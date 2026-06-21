@@ -1,0 +1,12 @@
+# Режим разработки: hot-reload и монтирование исходников
+# Запуск: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  api:
+    environment:
+      DEBUG: "true"
+      UVICORN_RELOAD: "true"
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./scripts:/app/scripts
