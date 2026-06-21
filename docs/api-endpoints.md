@@ -254,7 +254,9 @@ Authorization: Bearer <access_token>
 
 ### `GET /api/v1/subscription-plans`
 
-Список тарифов. Авторизация не требуется.
+Список тарифов с учётом **активных акций** (скидка применяется автоматически, без промокода). Авторизация не требуется.
+
+При активной акции в ответе есть `price_monthly` (без скидки), `promotional_price_monthly` (со скидкой) и `active_promotion`.
 
 **Ответ `200`:**
 
@@ -268,34 +270,37 @@ Authorization: Bearer <access_token>
     "max_users": 10,
     "max_branches": 3,
     "max_roles": 5,
-    "price_monthly": 990
-  },
-  {
-    "id": "22222222-2222-2222-2222-222222222222",
-    "code": "business",
-    "name": "Бизнес",
-    "description": "До 50 сотрудников, 10 филиалов, 20 ролей",
-    "max_users": 50,
-    "max_branches": 10,
-    "max_roles": 20,
-    "price_monthly": 2990
+    "max_services": 10,
+    "max_appointments_per_month": 100,
+    "price_monthly": 990,
+    "promotional_price_monthly": 792,
+    "active_promotion": {
+      "id": "promo-uuid",
+      "name": "Старт со скидкой 20%",
+      "discount_percent": 20,
+      "first_plan_purchase_only": false
+    }
   }
 ]
 ```
+
+Если акции нет — `promotional_price_monthly` и `active_promotion` равны `null`.
 
 ---
 
 ### `GET /api/v1/companies/{company_id}/subscription/available-plans`
 
-Тарифы, доступные для смены с учётом текущего использования. Только владелец. Требуется JWT.
+Тарифы, доступные для смены с учётом текущего использования и **активных акций** для этой компании (включая проверку «первая покупка тарифа»). Только владелец. Требуется JWT.
 
-**Ответ `200`:** массив `SubscriptionPlanResponse`.
+**Ответ `200`:** массив `SubscriptionPlanResponse` (см. поля `promotional_price_monthly`, `active_promotion`).
 
 ---
 
 ### `POST /api/v1/payments/checkout/preview`
 
-Предпросмотр оплаты **до нажатия «Оплатить»**: расчёт суммы и проверка промокода без создания платежа. Требуется JWT.
+Предпросмотр оплаты **до нажатия «Оплатить»**: расчёт суммы, автоматическое применение акции и опциональная проверка промокода. Требуется JWT.
+
+Акция применяется автоматически. Если указан промокод с большей скидкой — используется промокод (не суммируются).
 
 **Запрос** (те же поля, что у checkout):
 
@@ -305,6 +310,37 @@ Authorization: Bearer <access_token>
   "action": "purchase",
   "period_months": 3,
   "promo_code": "SUMMER20"
+}
+```
+
+**Ответ `200` — акция применена автоматически:**
+
+```json
+{
+  "plan": {
+    "code": "starter",
+    "name": "Стартовый",
+    "price_monthly": 990,
+    "promotional_price_monthly": 792,
+    "active_promotion": {
+      "id": "promo-uuid",
+      "name": "Старт со скидкой 20%",
+      "discount_percent": 20,
+      "first_plan_purchase_only": true
+    }
+  },
+  "action": "purchase",
+  "period_months": 3,
+  "original_amount": 2970,
+  "discount_amount": 594,
+  "amount": 2376,
+  "currency": "RUB",
+  "promo_code": null,
+  "promo_applied": false,
+  "promo_error": null,
+  "promotion_id": "promo-uuid",
+  "promotion_name": "Старт со скидкой 20%",
+  "promotion_applied": true
 }
 ```
 
@@ -484,6 +520,8 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
   "subscriptions_count": 30,
   "promo_codes_count": 5,
   "active_promo_codes_count": 3,
+  "subscription_promotions_count": 2,
+  "active_subscription_promotions_count": 1,
   "open_support_tickets_count": 7
 }
 ```
@@ -702,6 +740,85 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
 ```
 
 **Ответ `200`:** `PromoCodeResponse`.
+
+---
+
+## Акции на подписки — `/api/v1/admin/subscription-promotions`
+
+**Акции** в отличие от промокодов применяются **автоматически**: пользователь видит `price_monthly` и `promotional_price_monthly` в списке тарифов и при checkout без ввода кода.
+
+Доступ: platform admin.
+
+### `GET /api/v1/admin/subscription-promotions`
+
+Список акций.
+
+**Ответ `200`:**
+
+```json
+[
+  {
+    "id": "promo-uuid",
+    "name": "Старт со скидкой 20%",
+    "discount_percent": 20,
+    "plan_codes": ["starter"],
+    "actions": ["purchase"],
+    "for_all_companies": true,
+    "company_ids": null,
+    "first_plan_purchase_only": true,
+    "max_uses": null,
+    "used_count": 5,
+    "valid_from": null,
+    "valid_until": "2026-09-01T00:00:00+00:00",
+    "is_active": true,
+    "description": "Скидка на первую покупку тарифа",
+    "created_by_id": "admin-uuid",
+    "created_at": "2026-06-17T10:00:00+00:00"
+  }
+]
+```
+
+### `POST /api/v1/admin/subscription-promotions`
+
+Создание акции. Ответ `201`.
+
+**Для всех организаций, только первая покупка тарифа:**
+
+```json
+{
+  "name": "Старт со скидкой 20%",
+  "discount_percent": 20,
+  "plan_codes": ["starter"],
+  "actions": ["purchase"],
+  "for_all_companies": true,
+  "first_plan_purchase_only": true,
+  "valid_until": "2026-09-01T00:00:00Z",
+  "description": "Скидка при первой покупке тарифа у компании"
+}
+```
+
+**Для выбранных компаний** (`for_all_companies: false`, обязателен `company_ids`):
+
+```json
+{
+  "name": "Партнёрская скидка",
+  "discount_percent": 15,
+  "for_all_companies": false,
+  "company_ids": ["company-uuid-1", "company-uuid-2"]
+}
+```
+
+| Поле | Описание |
+|------|----------|
+| `for_all_companies` | `true` — акция для всех организаций |
+| `first_plan_purchase_only` | `true` — только если компания ещё не оплачивала этот тариф |
+| `plan_codes` | `null` — все тарифы |
+| `actions` | `null` — все типы оплаты |
+| `company_ids` | UUID компаний, если `for_all_companies: false` |
+
+### `PATCH /api/v1/admin/subscription-promotions/{promotion_id}`
+
+Обновление акции (скидка, срок, `is_active`, список компаний). Ответ `200`: `SubscriptionPromotionResponse`.
 
 ---
 

@@ -13,6 +13,7 @@ from app.schemas.cabinet import PaymentCheckoutCreate, PaymentResponse
 from app.schemas.schemas import SubscriptionPlanResponse
 from app.services.company_service import get_company_available_plans, list_all_plans
 from app.services.payment_service import create_checkout, get_payment, preview_checkout, process_webhook
+from app.services.plan_pricing_service import build_plan_responses_with_promotions
 from app.services.seed_service import seed_subscription_plans
 
 router = APIRouter(tags=["payments"])
@@ -32,6 +33,8 @@ def _payment_to_response(payment) -> PaymentResponse:
         currency=payment.currency,
         status=payment.status,
         promo_code=payment.promo_code.code if payment.promo_code else None,
+        promotion_id=payment.subscription_promotion_id,
+        promotion_name=payment.subscription_promotion.name if payment.subscription_promotion else None,
         confirmation_url=payment.confirmation_url,
         created_at=payment.created_at,
         paid_at=payment.paid_at,
@@ -42,7 +45,8 @@ def _payment_to_response(payment) -> PaymentResponse:
 @router.get("/subscription-plans", response_model=list[SubscriptionPlanResponse])
 async def list_plans(db: AsyncSession = Depends(get_db)) -> list:
     await seed_subscription_plans(db)
-    return await list_all_plans(db)
+    plans = await list_all_plans(db)
+    return await build_plan_responses_with_promotions(db, plans)
 
 
 @router.get("/companies/{company_id}/subscription/available-plans", response_model=list[SubscriptionPlanResponse])
@@ -50,7 +54,10 @@ async def list_available_plans_for_company_endpoint(
     tenant: TenantContext = Depends(get_company_tenant_owner),
     db: AsyncSession = Depends(get_db),
 ) -> list:
-    return await get_company_available_plans(db, tenant.company_id)
+    plans = await get_company_available_plans(db, tenant.company_id)
+    return await build_plan_responses_with_promotions(
+        db, plans, company_id=tenant.company_id
+    )
 
 
 @router.post("/payments/checkout/preview", response_model=PaymentCheckoutPreviewResponse)

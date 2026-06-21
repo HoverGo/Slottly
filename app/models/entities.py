@@ -229,6 +229,9 @@ class Payment(Base):
     promo_code_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("promo_codes.id"), nullable=True
     )
+    subscription_promotion_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription_promotions.id"), nullable=True
+    )
     provider_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -239,6 +242,9 @@ class Payment(Base):
         foreign_keys=[user_subscription_id],
     )
     promo_code: Mapped["PromoCode | None"] = relationship(foreign_keys=[promo_code_id])
+    subscription_promotion: Mapped["SubscriptionPromotion | None"] = relationship(
+        foreign_keys=[subscription_promotion_id]
+    )
 
 
 class PromoCode(Base):
@@ -263,6 +269,31 @@ class PromoCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
+
+
+class SubscriptionPromotion(Base):
+    """Акция на подписку: скидка применяется автоматически без промокода"""
+
+    __tablename__ = "subscription_promotions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_codes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    actions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    for_all_companies: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    company_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    first_plan_purchase_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
     created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
 
 

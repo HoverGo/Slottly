@@ -20,6 +20,9 @@ from app.schemas.admin import (
     PromoCodeCreate,
     PromoCodeResponse,
     PromoCodeUpdate,
+    SubscriptionPromotionCreate,
+    SubscriptionPromotionResponse,
+    SubscriptionPromotionUpdate,
 )
 from app.services.admin_service import (
     build_admin_company_response,
@@ -35,6 +38,11 @@ from app.services.announcement_service import (
     update_announcement,
 )
 from app.services.promo_service import create_promo_code, list_promo_codes, update_promo_code
+from app.services.promotion_service import (
+    create_subscription_promotion,
+    list_subscription_promotions,
+    update_subscription_promotion,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -261,5 +269,94 @@ async def admin_update_promo_code(
         )
         await db.refresh(promo, ["user"])
         return _promo_to_response(promo)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+def _promotion_to_response(promotion) -> SubscriptionPromotionResponse:
+    return SubscriptionPromotionResponse(
+        id=promotion.id,
+        name=promotion.name,
+        discount_percent=promotion.discount_percent,
+        plan_codes=promotion.plan_codes,
+        actions=promotion.actions,
+        for_all_companies=promotion.for_all_companies,
+        company_ids=promotion.company_ids,
+        first_plan_purchase_only=promotion.first_plan_purchase_only,
+        max_uses=promotion.max_uses,
+        used_count=promotion.used_count,
+        valid_from=promotion.valid_from,
+        valid_until=promotion.valid_until,
+        is_active=promotion.is_active,
+        description=promotion.description,
+        created_by_id=promotion.created_by_id,
+        created_at=promotion.created_at,
+    )
+
+
+@router.get("/subscription-promotions", response_model=list[SubscriptionPromotionResponse])
+async def admin_list_subscription_promotions(
+    _: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[SubscriptionPromotionResponse]:
+    items = await list_subscription_promotions(db)
+    return [_promotion_to_response(item) for item in items]
+
+
+@router.post("/subscription-promotions", response_model=SubscriptionPromotionResponse, status_code=201)
+async def admin_create_subscription_promotion(
+    data: SubscriptionPromotionCreate,
+    admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionPromotionResponse:
+    try:
+        promotion = await create_subscription_promotion(
+            db,
+            admin,
+            name=data.name,
+            discount_percent=data.discount_percent,
+            plan_codes=data.plan_codes,
+            actions=[action.value for action in data.actions] if data.actions else None,
+            for_all_companies=data.for_all_companies,
+            company_ids=data.company_ids,
+            first_plan_purchase_only=data.first_plan_purchase_only,
+            max_uses=data.max_uses,
+            valid_from=data.valid_from,
+            valid_until=data.valid_until,
+            description=data.description,
+        )
+        return _promotion_to_response(promotion)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.patch("/subscription-promotions/{promotion_id}", response_model=SubscriptionPromotionResponse)
+async def admin_update_subscription_promotion(
+    promotion_id: UUID,
+    data: SubscriptionPromotionUpdate,
+    _: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionPromotionResponse:
+    try:
+        promotion = await update_subscription_promotion(
+            db,
+            promotion_id,
+            name=data.name,
+            discount_percent=data.discount_percent,
+            plan_codes=data.plan_codes,
+            actions=[action.value for action in data.actions] if data.actions is not None else None,
+            for_all_companies=data.for_all_companies,
+            company_ids=data.company_ids,
+            clear_company_ids=data.clear_company_ids,
+            first_plan_purchase_only=data.first_plan_purchase_only,
+            max_uses=data.max_uses,
+            valid_from=data.valid_from,
+            valid_until=data.valid_until,
+            is_active=data.is_active,
+            description=data.description,
+            clear_valid_from=data.clear_valid_from,
+            clear_valid_until=data.clear_valid_until,
+        )
+        return _promotion_to_response(promotion)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

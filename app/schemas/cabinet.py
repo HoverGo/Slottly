@@ -32,6 +32,8 @@ class PaymentResponse(BaseModel):
     currency: str
     status: PaymentStatus
     promo_code: str | None = None
+    promotion_id: UUID | None = None
+    promotion_name: str | None = None
     confirmation_url: str | None
     created_at: datetime
     paid_at: datetime | None

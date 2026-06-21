@@ -15,6 +15,8 @@ class AdminDashboardResponse(BaseModel):
     subscriptions_count: int
     promo_codes_count: int
     active_promo_codes_count: int
+    subscription_promotions_count: int = 0
+    active_subscription_promotions_count: int = 0
     open_support_tickets_count: int = 0
 
 
@@ -158,3 +160,59 @@ class PaymentCheckoutPreviewResponse(BaseModel):
     promo_code: str | None = None
     promo_applied: bool
     promo_error: str | None = None
+    promotion_id: UUID | None = None
+    promotion_name: str | None = None
+    promotion_applied: bool = False
+
+
+class SubscriptionPromotionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    discount_percent: int = Field(ge=1, le=100)
+    plan_codes: list[str] | None = None
+    actions: list[PaymentAction] | None = None
+    for_all_companies: bool = True
+    company_ids: list[UUID] | None = None
+    first_plan_purchase_only: bool = False
+    max_uses: int | None = Field(default=None, ge=1)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    description: str | None = Field(default=None, max_length=500)
+
+
+class SubscriptionPromotionUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    discount_percent: int | None = Field(default=None, ge=1, le=100)
+    plan_codes: list[str] | None = None
+    actions: list[PaymentAction] | None = None
+    for_all_companies: bool | None = None
+    company_ids: list[UUID] | None = None
+    clear_company_ids: bool = False
+    first_plan_purchase_only: bool | None = None
+    max_uses: int | None = Field(default=None, ge=1)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    clear_valid_from: bool = False
+    clear_valid_until: bool = False
+    is_active: bool | None = None
+    description: str | None = Field(default=None, max_length=500)
+
+
+class SubscriptionPromotionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    discount_percent: int
+    plan_codes: list[str] | None
+    actions: list[str] | None
+    for_all_companies: bool
+    company_ids: list[str] | None
+    first_plan_purchase_only: bool
+    max_uses: int | None
+    used_count: int
+    valid_from: datetime | None
+    valid_until: datetime | None
+    is_active: bool
+    description: str | None
+    created_by_id: UUID
+    created_at: datetime

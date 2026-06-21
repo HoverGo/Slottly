@@ -228,6 +228,13 @@ class BranchResponse(BaseModel):
     created_at: datetime
 
 
+class SubscriptionPlanPromotionInfo(BaseModel):
+    id: UUID
+    name: str
+    discount_percent: int
+    first_plan_purchase_only: bool = False
+
+
 class SubscriptionPlanResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -241,6 +248,11 @@ class SubscriptionPlanResponse(BaseModel):
     max_services: int
     max_appointments_per_month: int
     price_monthly: int
+    promotional_price_monthly: int | None = Field(
+        default=None,
+        description="Цена за месяц с учётом активной акции",
+    )
+    active_promotion: SubscriptionPlanPromotionInfo | None = None
 
 
 class SubscriptionLimitsResponse(BaseModel):

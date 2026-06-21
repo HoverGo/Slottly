@@ -10,6 +10,7 @@ from app.models.entities import (
     Payment,
     PaymentStatus,
     PromoCode,
+    SubscriptionPromotion,
     SubscriptionStatus,
     User,
     UserSubscription,
@@ -37,6 +38,17 @@ async def get_dashboard_stats(db: AsyncSession) -> dict[str, int]:
         )
         or 0
     )
+    subscription_promotions = (
+        await db.scalar(select(func.count()).select_from(SubscriptionPromotion)) or 0
+    )
+    active_subscription_promotions = (
+        await db.scalar(
+            select(func.count())
+            .select_from(SubscriptionPromotion)
+            .where(SubscriptionPromotion.is_active.is_(True))
+        )
+        or 0
+    )
 
     open_support = await count_open_tickets(db)
 
@@ -47,6 +59,8 @@ async def get_dashboard_stats(db: AsyncSession) -> dict[str, int]:
         "subscriptions_count": subscriptions,
         "promo_codes_count": promo_codes,
         "active_promo_codes_count": active_promo_codes,
+        "subscription_promotions_count": subscription_promotions,
+        "active_subscription_promotions_count": active_subscription_promotions,
         "open_support_tickets_count": open_support,
     }
 
