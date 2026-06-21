@@ -3,10 +3,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import admin, admin_support, auth, cabinet, companies, payments, permissions, schedules, services, support
+from app.api.routes import admin, admin_support, announcements, auth, cabinet, companies, dashboard, media, payments, permissions, public_booking, public_media, reviews, schedules, services, support, warehouse
 from app.core.database import async_session_factory
 from app.core.exceptions import AppError
-from app.services.seed_service import promote_platform_admins, promote_platform_support, seed_subscription_plans
+from app.services.seed_service import (
+    ensure_basic_subscriptions_for_users,
+    promote_platform_admins,
+    promote_platform_support,
+    seed_subscription_plans,
+)
 
 
 @asynccontextmanager
@@ -15,6 +20,7 @@ async def lifespan(_: FastAPI):
         await seed_subscription_plans(session)
         await promote_platform_admins(session)
         await promote_platform_support(session)
+        await ensure_basic_subscriptions_for_users(session)
         await session.commit()
     yield
 
@@ -34,14 +40,21 @@ async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(announcements.router, prefix="/api/v1")
 app.include_router(admin_support.router, prefix="/api/v1")
 app.include_router(support.router, prefix="/api/v1")
 app.include_router(cabinet.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(permissions.router, prefix="/api/v1")
 app.include_router(companies.router, prefix="/api/v1")
+app.include_router(media.router, prefix="/api/v1")
 app.include_router(services.router, prefix="/api/v1")
 app.include_router(schedules.router, prefix="/api/v1")
+app.include_router(public_booking.router, prefix="/api/v1")
+app.include_router(public_media.router, prefix="/api/v1")
+app.include_router(warehouse.router, prefix="/api/v1")
+app.include_router(reviews.router, prefix="/api/v1")
+app.include_router(dashboard.router, prefix="/api/v1")
 
 
 @app.get("/health")

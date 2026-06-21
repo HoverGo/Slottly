@@ -67,6 +67,8 @@ class WorkScheduleSlotsResponse(BaseModel):
     to_date: date
     service_id: UUID | None = None
     booking_duration_minutes: int | None = None
+    buffer_before_minutes: int | None = None
+    buffer_after_minutes: int | None = None
     slots_by_day: dict[str, list[str]]
 
 

@@ -13,17 +13,26 @@ from app.schemas.admin import (
     AdminDashboardResponse,
     AdminUserResponse,
     PlatformAdminUpdate,
+    PlatformAnnouncementCreate,
+    PlatformAnnouncementResponse,
+    PlatformAnnouncementUpdate,
     PlatformSupportUpdate,
     PromoCodeCreate,
     PromoCodeResponse,
     PromoCodeUpdate,
 )
 from app.services.admin_service import (
+    build_admin_company_response,
     get_dashboard_stats,
     list_companies_admin,
     list_users_admin,
     set_user_platform_admin,
     set_user_platform_support,
+)
+from app.services.announcement_service import (
+    create_announcement,
+    list_announcements_admin,
+    update_announcement,
 )
 from app.services.promo_service import create_promo_code, list_promo_codes, update_promo_code
 
@@ -109,18 +118,80 @@ async def admin_list_companies(
     db: AsyncSession = Depends(get_db),
 ) -> list[AdminCompanyResponse]:
     companies = await list_companies_admin(db, limit=limit, offset=offset)
-    return [
-        AdminCompanyResponse(
-            id=company.id,
-            name=company.name,
-            owner_id=company.owner_id,
-            owner_email=company.owner.email if company.owner else None,
-            owner_name=company.owner.full_name if company.owner else None,
-            is_owner_first_company=company.is_owner_first_company,
-            created_at=company.created_at,
+    result = []
+    for company in companies:
+        data = await build_admin_company_response(db, company)
+        result.append(AdminCompanyResponse(**data))
+    return result
+
+
+def _announcement_response(item) -> PlatformAnnouncementResponse:
+    return PlatformAnnouncementResponse(
+        id=item.id,
+        title=item.title,
+        message=item.message,
+        maintenance_starts_at=item.maintenance_starts_at,
+        maintenance_ends_at=item.maintenance_ends_at,
+        is_active=item.is_active,
+        created_by_id=item.created_by_id,
+        created_by_name=item.created_by.full_name if item.created_by else None,
+        created_at=item.created_at,
+    )
+
+
+@router.get("/announcements", response_model=list[PlatformAnnouncementResponse])
+async def admin_list_announcements(
+    _: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[PlatformAnnouncementResponse]:
+    items = await list_announcements_admin(db)
+    return [_announcement_response(item) for item in items]
+
+
+@router.post("/announcements", response_model=PlatformAnnouncementResponse, status_code=201)
+async def admin_create_announcement(
+    data: PlatformAnnouncementCreate,
+    admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PlatformAnnouncementResponse:
+    try:
+        item = await create_announcement(
+            db,
+            admin,
+            title=data.title,
+            message=data.message,
+            maintenance_starts_at=data.maintenance_starts_at,
+            maintenance_ends_at=data.maintenance_ends_at,
         )
-        for company in companies
-    ]
+        await db.refresh(item, ["created_by"])
+        return _announcement_response(item)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.patch("/announcements/{announcement_id}", response_model=PlatformAnnouncementResponse)
+async def admin_update_announcement(
+    announcement_id: UUID,
+    data: PlatformAnnouncementUpdate,
+    _: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PlatformAnnouncementResponse:
+    try:
+        item = await update_announcement(
+            db,
+            announcement_id,
+            title=data.title,
+            message=data.message,
+            maintenance_starts_at=data.maintenance_starts_at,
+            maintenance_ends_at=data.maintenance_ends_at,
+            is_active=data.is_active,
+            clear_maintenance_starts_at=data.clear_maintenance_starts_at,
+            clear_maintenance_ends_at=data.clear_maintenance_ends_at,
+        )
+        await db.refresh(item, ["created_by"])
+        return _announcement_response(item)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
 @router.get("/promo-codes", response_model=list[PromoCodeResponse])

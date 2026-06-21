@@ -7,6 +7,9 @@ from app.models.entities import User
 from app.schemas.schemas import PasswordChange, UserRegister
 
 
+from app.services.subscription_limits_service import grant_basic_subscription
+
+
 async def register_user(db: AsyncSession, data: UserRegister) -> User:
     existing = await db.execute(select(User).where(User.email == data.email))
     if existing.scalar_one_or_none():
@@ -19,6 +22,7 @@ async def register_user(db: AsyncSession, data: UserRegister) -> User:
     )
     db.add(user)
     await db.flush()
+    await grant_basic_subscription(db, user.id)
     return user
 
 

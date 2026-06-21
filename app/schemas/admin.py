@@ -40,6 +40,48 @@ class AdminCompanyResponse(BaseModel):
     owner_name: str | None = None
     is_owner_first_company: bool
     created_at: datetime
+    subscription_id: UUID | None = None
+    plan_code: str | None = None
+    plan_name: str | None = None
+    subscription_status: str | None = None
+    expires_at: datetime | None = None
+    is_subscription_active: bool = False
+    is_paid: bool = False
+    is_free_plan: bool = False
+    last_payment_status: str | None = None
+    last_payment_paid_at: datetime | None = None
+    last_payment_amount: int | None = None
+
+
+class PlatformAnnouncementCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    message: str = Field(min_length=1, max_length=10000)
+    maintenance_starts_at: datetime | None = None
+    maintenance_ends_at: datetime | None = None
+
+
+class PlatformAnnouncementUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    message: str | None = Field(default=None, min_length=1, max_length=10000)
+    maintenance_starts_at: datetime | None = None
+    maintenance_ends_at: datetime | None = None
+    is_active: bool | None = None
+    clear_maintenance_starts_at: bool = False
+    clear_maintenance_ends_at: bool = False
+
+
+class PlatformAnnouncementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    message: str
+    maintenance_starts_at: datetime | None
+    maintenance_ends_at: datetime | None
+    is_active: bool
+    created_by_id: UUID
+    created_by_name: str | None = None
+    created_at: datetime
 
 
 class PromoCodeCreate(BaseModel):

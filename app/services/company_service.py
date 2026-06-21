@@ -43,6 +43,12 @@ async def require_active_subscription(db: AsyncSession, company: Company):
     return subscription
 
 
+from app.services.subscription_limits_service import (
+    count_company_appointments_in_month,
+    count_company_services,
+)
+
+
 async def check_subscription_limit(
     db: AsyncSession,
     company: Company,
@@ -50,10 +56,14 @@ async def check_subscription_limit(
     add_users: int = 0,
     add_branches: int = 0,
     add_roles: int = 0,
+    add_services: int = 0,
+    add_appointments: int = 0,
 ) -> None:
     subscription = await require_active_subscription(db, company)
     plan = subscription.plan
     users, branches, roles = await count_company_entities(db, company.id)
+    services = await count_company_services(db, company.id)
+    appointments = await count_company_appointments_in_month(db, company.id)
 
     if users + add_users > plan.max_users:
         raise ForbiddenError(f"Лимит пользователей ({plan.max_users}) исчерпан")
@@ -61,11 +71,19 @@ async def check_subscription_limit(
         raise ForbiddenError(f"Лимит филиалов ({plan.max_branches}) исчерпан")
     if roles + add_roles > plan.max_roles:
         raise ForbiddenError(f"Лимит ролей ({plan.max_roles}) исчерпан")
+    if services + add_services > plan.max_services:
+        raise ForbiddenError(f"Лимит услуг ({plan.max_services}) исчерпан")
+    if appointments + add_appointments > plan.max_appointments_per_month:
+        raise ForbiddenError(
+            f"Лимит записей в месяц ({plan.max_appointments_per_month}) исчерпан"
+        )
 
 
 async def get_subscription_limits(db: AsyncSession, company: Company) -> dict:
     subscription = await get_company_subscription(db, company.id)
     users, branches, roles = await count_company_entities(db, company.id)
+    services = await count_company_services(db, company.id)
+    appointments = await count_company_appointments_in_month(db, company.id)
 
     if subscription:
         plan = subscription.plan
@@ -73,9 +91,13 @@ async def get_subscription_limits(db: AsyncSession, company: Company) -> dict:
             "max_users": plan.max_users,
             "max_branches": plan.max_branches,
             "max_roles": plan.max_roles,
+            "max_services": plan.max_services,
+            "max_appointments_per_month": plan.max_appointments_per_month,
             "current_users": users,
             "current_branches": branches,
             "current_roles": roles,
+            "current_services": services,
+            "current_appointments_this_month": appointments,
             "has_active_subscription": True,
             "expires_at": subscription.expires_at,
             "scheduled_plan_code": subscription.scheduled_plan.code if subscription.scheduled_plan else None,
@@ -86,9 +108,13 @@ async def get_subscription_limits(db: AsyncSession, company: Company) -> dict:
         "max_users": 0,
         "max_branches": 0,
         "max_roles": 0,
+        "max_services": 0,
+        "max_appointments_per_month": 0,
         "current_users": users,
         "current_branches": branches,
         "current_roles": roles,
+        "current_services": services,
+        "current_appointments_this_month": appointments,
         "has_active_subscription": False,
         "expires_at": None,
         "scheduled_plan_code": None,

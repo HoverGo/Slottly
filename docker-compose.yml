@@ -30,6 +30,11 @@ services:
       PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
       PLATFORM_SUPPORT_EMAILS: ${PLATFORM_SUPPORT_EMAILS:-}
+      INVITE_BASE_URL: ${INVITE_BASE_URL:-http://localhost:8000/invite}
+      INVITE_TOKEN_EXPIRE_DAYS: ${INVITE_TOKEN_EXPIRE_DAYS:-7}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -37,3 +42,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:

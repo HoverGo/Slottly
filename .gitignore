@@ -11,4 +11,5 @@ venv/
 .mypy_cache/
 htmlcov/
 .coverage
+uploads/
 docs.rar

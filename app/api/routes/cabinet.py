@@ -10,12 +10,16 @@ from app.models.entities import User
 from app.schemas.cabinet import (
     CabinetResponse,
     JoinRequestResponse,
+    PlatformAnnouncementPublicResponse,
     UserSubscriptionResponse,
 )
 from app.schemas.schemas import CompanyResponse, UserResponse
+from app.services.company_profile_service import company_to_response
+from app.services.announcement_service import list_active_announcements
 from app.services.company_service import get_active_subscription, list_accessible_companies
 from app.services.join_request_service import (
     accept_join_request,
+    join_request_response_data,
     list_user_pending_requests,
     reject_join_request,
 )
@@ -26,20 +30,7 @@ router = APIRouter(prefix="/cabinet", tags=["cabinet"])
 
 
 def _join_request_response(req) -> JoinRequestResponse:
-    return JoinRequestResponse(
-        id=req.id,
-        company_id=req.company_id,
-        user_id=req.user_id,
-        role_id=req.role_id,
-        invited_by_id=req.invited_by_id,
-        status=req.status,
-        message=req.message,
-        created_at=req.created_at,
-        responded_at=req.responded_at,
-        company_name=req.company.name if req.company else None,
-        role_name=req.role.name if req.role else None,
-        invited_by_name=req.invited_by.full_name if req.invited_by else None,
-    )
+    return JoinRequestResponse(**join_request_response_data(req))
 
 
 def _subscription_response(sub) -> UserSubscriptionResponse:
@@ -59,15 +50,7 @@ def _subscription_response(sub) -> UserSubscriptionResponse:
 
 
 def _company_response(company, has_sub: bool, is_owner: bool) -> CompanyResponse:
-    return CompanyResponse(
-        id=company.id,
-        name=company.name,
-        owner_id=company.owner_id,
-        is_owner_first_company=company.is_owner_first_company,
-        created_at=company.created_at,
-        has_active_subscription=has_sub,
-        is_owner=is_owner,
-    )
+    return CompanyResponse(**company_to_response(company, has_sub=has_sub, is_owner=is_owner))
 
 
 @router.get("", response_model=CabinetResponse)
@@ -84,6 +67,7 @@ async def get_cabinet(
 
     pending = await list_user_pending_requests(db, current_user.id)
     available_slots = sum(1 for s in subscriptions if s.company_id is None and s.status.value == "active")
+    announcements = await list_active_announcements(db)
 
     return CabinetResponse(
         user=UserResponse.model_validate(current_user),
@@ -92,6 +76,17 @@ async def get_cabinet(
         available_subscription_slots=available_slots,
         companies=companies,
         pending_join_requests=[_join_request_response(r) for r in pending],
+        platform_announcements=[
+            PlatformAnnouncementPublicResponse(
+                id=item.id,
+                title=item.title,
+                message=item.message,
+                maintenance_starts_at=item.maintenance_starts_at,
+                maintenance_ends_at=item.maintenance_ends_at,
+                created_at=item.created_at,
+            )
+            for item in announcements
+        ],
     )
 
 
@@ -125,6 +120,7 @@ async def reject_request(
 ) -> JoinRequestResponse:
     try:
         request = await reject_join_request(db, current_user, request_id)
-        return JoinRequestResponse.model_validate(request)
+        await db.refresh(request, ["company", "role", "invited_by"])
+        return JoinRequestResponse(**join_request_response_data(request))
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

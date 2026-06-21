@@ -8,7 +8,10 @@ from sqlalchemy.orm import selectinload
 from app.models.entities import (
     AppointmentStatus,
     Branch,
+    CompanyClient,
+    CompanyGalleryPhoto,
     CompanyMember,
+    CompanyRequisites,
     CompanyRole,
     CompanyService,
     MemberAppointment,
@@ -95,6 +98,7 @@ class TenantRepository:
     ) -> list[CompanyService]:
         query = (
             select(CompanyService)
+            .options(selectinload(CompanyService.member).selectinload(CompanyMember.user))
             .where(CompanyService.company_id == self.company_id)
             .order_by(CompanyService.created_at.desc())
         )
@@ -109,7 +113,9 @@ class TenantRepository:
 
     async def get_service_by_id(self, service_id: UUID) -> CompanyService | None:
         result = await self.db.execute(
-            select(CompanyService).where(
+            select(CompanyService)
+            .options(selectinload(CompanyService.member).selectinload(CompanyMember.user))
+            .where(
                 CompanyService.id == service_id,
                 CompanyService.company_id == self.company_id,
             )
@@ -157,6 +163,21 @@ class TenantRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def list_client_appointments(self, client_id: UUID) -> list[MemberAppointment]:
+        result = await self.db.execute(
+            select(MemberAppointment)
+            .options(
+                selectinload(MemberAppointment.service).selectinload(CompanyService.branch),
+                selectinload(MemberAppointment.member).selectinload(CompanyMember.user),
+            )
+            .where(
+                MemberAppointment.client_id == client_id,
+                MemberAppointment.company_id == self.company_id,
+            )
+            .order_by(MemberAppointment.starts_at.desc())
+        )
+        return list(result.scalars().all())
 
     async def get_member_by_id(self, member_id: UUID) -> CompanyMember | None:
         result = await self.db.execute(
@@ -262,3 +283,34 @@ class TenantRepository:
         from app.services.subscription_service import get_company_subscription
 
         return await get_company_subscription(self.db, self.company_id)
+
+    async def list_gallery_photos(self) -> list[CompanyGalleryPhoto]:
+        result = await self.db.execute(
+            select(CompanyGalleryPhoto)
+            .where(CompanyGalleryPhoto.company_id == self.company_id)
+            .order_by(CompanyGalleryPhoto.sort_order, CompanyGalleryPhoto.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def count_gallery_photos(self) -> int:
+        result = await self.db.scalar(
+            select(func.count())
+            .select_from(CompanyGalleryPhoto)
+            .where(CompanyGalleryPhoto.company_id == self.company_id)
+        )
+        return result or 0
+
+    async def get_gallery_photo(self, photo_id: UUID) -> CompanyGalleryPhoto | None:
+        result = await self.db.execute(
+            select(CompanyGalleryPhoto).where(
+                CompanyGalleryPhoto.id == photo_id,
+                CompanyGalleryPhoto.company_id == self.company_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_requisites(self) -> CompanyRequisites | None:
+        result = await self.db.execute(
+            select(CompanyRequisites).where(CompanyRequisites.company_id == self.company_id)
+        )
+        return result.scalar_one_or_none()

@@ -208,6 +208,15 @@ def get_appointment_end(appointment: MemberAppointment) -> datetime:
     return start + timedelta(minutes=appointment.duration_minutes)
 
 
+def get_appointment_blocked_interval(appointment: MemberAppointment) -> tuple[datetime, datetime]:
+    start = normalize_datetime(appointment.starts_at)
+    blocked_start = start - timedelta(minutes=appointment.buffer_before_minutes)
+    blocked_end = start + timedelta(
+        minutes=appointment.duration_minutes + appointment.buffer_after_minutes
+    )
+    return blocked_start, blocked_end
+
+
 def intervals_overlap(start_a: datetime, end_a: datetime, start_b: datetime, end_b: datetime) -> bool:
     a0, a1 = normalize_datetime(start_a), normalize_datetime(end_a)
     b0, b1 = normalize_datetime(start_b), normalize_datetime(end_b)
@@ -217,19 +226,27 @@ def intervals_overlap(start_a: datetime, end_a: datetime, start_b: datetime, end
 def filter_slots_by_appointments(
     slots: list[datetime],
     appointments: list[MemberAppointment],
+    *,
     duration_minutes: int,
+    buffer_before_minutes: int = 0,
+    buffer_after_minutes: int = 0,
+    day_start: datetime,
     day_end: datetime,
 ) -> list[datetime]:
-    delta = timedelta(minutes=duration_minutes)
     active = [a for a in appointments if a.status != AppointmentStatus.CANCELLED]
 
     result: list[datetime] = []
     for slot in slots:
-        slot_end = slot + delta
-        if slot_end > day_end:
+        blocked_start = slot - timedelta(minutes=buffer_before_minutes)
+        blocked_end = slot + timedelta(minutes=duration_minutes + buffer_after_minutes)
+        if blocked_start < day_start or blocked_end > day_end:
             continue
         blocked = any(
-            intervals_overlap(slot, slot_end, apt.starts_at, get_appointment_end(apt))
+            intervals_overlap(
+                blocked_start,
+                blocked_end,
+                *get_appointment_blocked_interval(apt),
+            )
             for apt in active
         )
         if not blocked:
@@ -298,6 +315,8 @@ def generate_slots_for_day(
     exceptions: list[MemberScheduleException] | None = None,
     appointments: list[MemberAppointment] | None = None,
     booking_duration_minutes: int | None = None,
+    buffer_before_minutes: int = 0,
+    buffer_after_minutes: int = 0,
 ) -> list[datetime]:
     if not is_working_day(schedule, day):
         return []
@@ -315,14 +334,21 @@ def generate_slots_for_day(
         slots = apply_schedule_exceptions(day, slots, exceptions)
 
     duration = booking_duration_minutes or schedule.slot_interval_minutes
+    day_start = datetime.combine(day, schedule.time_start)
     day_end = datetime.combine(day, schedule.time_end)
-    if appointments:
-        day_appointments = [
-            a for a in appointments if normalize_datetime(a.starts_at).date() == day
-        ]
-        slots = filter_slots_by_appointments(slots, day_appointments, duration, day_end)
-    elif booking_duration_minutes is not None:
-        slots = filter_slots_by_appointments(slots, [], duration, day_end)
+    day_appointments = [
+        a for a in (appointments or []) if normalize_datetime(a.starts_at).date() == day
+    ]
+    if appointments or booking_duration_minutes is not None:
+        slots = filter_slots_by_appointments(
+            slots,
+            day_appointments,
+            duration_minutes=duration,
+            buffer_before_minutes=buffer_before_minutes if booking_duration_minutes else 0,
+            buffer_after_minutes=buffer_after_minutes if booking_duration_minutes else 0,
+            day_start=day_start,
+            day_end=day_end,
+        )
 
     return slots
 
@@ -334,6 +360,8 @@ def generate_slots_range(
     exceptions: list[MemberScheduleException] | None = None,
     appointments: list[MemberAppointment] | None = None,
     booking_duration_minutes: int | None = None,
+    buffer_before_minutes: int = 0,
+    buffer_after_minutes: int = 0,
 ) -> dict[str, list[str]]:
     if to_date < from_date:
         raise AppError("to_date не может быть раньше from_date")
@@ -349,6 +377,8 @@ def generate_slots_range(
             exceptions,
             appointments=appointments,
             booking_duration_minutes=booking_duration_minutes,
+            buffer_before_minutes=buffer_before_minutes,
+            buffer_after_minutes=buffer_after_minutes,
         )
         if day_slots:
             result[current.isoformat()] = [s.strftime("%H:%M") for s in day_slots]

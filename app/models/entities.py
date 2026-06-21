@@ -40,9 +40,16 @@ class PaymentStatus(str, enum.Enum):
 
 class JoinRequestStatus(str, enum.Enum):
     PENDING = "pending"
+    PENDING_ACTIVATION = "pending_activation"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+
+
+class CompensationType(str, enum.Enum):
+    PERCENT = "percent"
+    SALARY = "salary"
+    SALARY_PLUS_PERCENT = "salary_plus_percent"
 
 
 class SchedulePatternType(str, enum.Enum):
@@ -62,12 +69,48 @@ class AppointmentStatus(str, enum.Enum):
     COMPLETED = "completed"
 
 
+class OrganizationType(str, enum.Enum):
+    IP = "ip"
+    SELF_EMPLOYED = "self_employed"
+    LLC = "llc"
+
+
+class WarehouseItemType(str, enum.Enum):
+    PRODUCT = "product"
+    CONSUMABLE = "consumable"
+
+
+class StockMovementType(str, enum.Enum):
+    RECEIPT = "receipt"
+    ISSUE = "issue"
+    ADJUSTMENT = "adjustment"
+    TRANSFER = "transfer"
+
+
 class SupportTicketStatus(str, enum.Enum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
     WAITING_USER = "waiting_user"
     RESOLVED = "resolved"
     CLOSED = "closed"
+
+
+class PlatformAnnouncement(Base):
+    """Объявление платформы для всех компаний (техработы и т.п.)"""
+
+    __tablename__ = "platform_announcements"
+    __table_args__ = (Index("ix_platform_announcements_is_active", "is_active"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    maintenance_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    maintenance_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
 
 
 class User(Base):
@@ -107,6 +150,8 @@ class SubscriptionPlan(Base):
     max_users: Mapped[int] = mapped_column(Integer, nullable=False)
     max_branches: Mapped[int] = mapped_column(Integer, nullable=False)
     max_roles: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_services: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    max_appointments_per_month: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     price_monthly: Mapped[int] = mapped_column(Integer, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -227,8 +272,22 @@ class Company(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    photo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    organization_type: Mapped[OrganizationType | None] = mapped_column(
+        Enum(OrganizationType, name="organization_type"), nullable=True
+    )
+    working_hours: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    booking_slug: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    public_booking_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_owner_first_company: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     owner: Mapped["User"] = relationship(back_populates="owned_companies")
     subscription: Mapped["UserSubscription | None"] = relationship(
@@ -245,6 +304,59 @@ class Company(Base):
     services: Mapped[list["CompanyService"]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
+    clients: Mapped[list["CompanyClient"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    gallery_photos: Mapped[list["CompanyGalleryPhoto"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan", order_by="CompanyGalleryPhoto.sort_order"
+    )
+    requisites: Mapped["CompanyRequisites | None"] = relationship(
+        back_populates="company", cascade="all, delete-orphan", uselist=False
+    )
+    warehouse_items: Mapped[list["WarehouseItem"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    reviews: Mapped[list["CompanyReview"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+
+
+class CompanyRequisites(Base):
+    """Реквизиты организации для выставления счетов"""
+
+    __tablename__ = "company_requisites"
+    __table_args__ = (
+        UniqueConstraint("company_id", name="uq_company_requisites_company_id"),
+        Index("ix_company_requisites_company_id", "company_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    legal_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    inn: Mapped[str] = mapped_column(String(12), nullable=False)
+    kpp: Mapped[str | None] = mapped_column(String(9), nullable=True)
+    billing_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    company: Mapped["Company"] = relationship(back_populates="requisites")
+
+
+class CompanyGalleryPhoto(Base):
+    """Фото студии компании"""
+
+    __tablename__ = "company_gallery_photos"
+    __table_args__ = (Index("ix_company_gallery_photos_company_id", "company_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    company: Mapped["Company"] = relationship(back_populates="gallery_photos")
 
 
 class CompanyRole(Base):
@@ -282,6 +394,12 @@ class CompanyMember(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    photo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    compensation_type: Mapped[CompensationType | None] = mapped_column(
+        Enum(CompensationType, name="compensation_type"), nullable=True
+    )
+    compensation_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    compensation_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     company: Mapped["Company"] = relationship(back_populates="members")
@@ -414,11 +532,21 @@ class CompanyJoinRequest(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    invite_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    invite_full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    invite_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    activation_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     invited_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    compensation_type: Mapped[CompensationType | None] = mapped_column(
+        Enum(CompensationType, name="compensation_type", create_type=False), nullable=True
+    )
+    compensation_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    compensation_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[JoinRequestStatus] = mapped_column(
-        Enum(JoinRequestStatus, name="join_request_status"),
+        Enum(JoinRequestStatus, name="join_request_status", create_type=False),
         default=JoinRequestStatus.PENDING,
         nullable=False,
     )
@@ -465,8 +593,11 @@ class CompanyService(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    buffer_before_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    buffer_after_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("company_members.id"), nullable=True
@@ -507,15 +638,178 @@ class MemberAppointment(Base):
     service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("company_services.id"), nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    buffer_before_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    buffer_after_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_clients.id"), nullable=True
+    )
     client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     client_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    client_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[AppointmentStatus] = mapped_column(
         Enum(AppointmentStatus, name="appointment_status"), nullable=False
     )
-    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     member: Mapped["CompanyMember"] = relationship(back_populates="appointments")
     service: Mapped["CompanyService"] = relationship(back_populates="appointments")
+    client: Mapped["CompanyClient | None"] = relationship(back_populates="appointments")
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+
+
+class CompanyClient(Base):
+    """Клиент компании, идентифицируется по номеру телефона в рамках компании"""
+
+    __tablename__ = "company_clients"
+    __table_args__ = (
+        UniqueConstraint("company_id", "phone_normalized", name="uq_company_client_phone"),
+        Index("ix_company_clients_company_id", "company_id"),
+        Index("ix_company_clients_phone_normalized", "phone_normalized"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    phone_normalized: Mapped[str] = mapped_column(String(20), nullable=False)
+    phone_display: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    company: Mapped["Company"] = relationship(back_populates="clients")
+    appointments: Mapped[list["MemberAppointment"]] = relationship(back_populates="client")
+    reviews: Mapped[list["CompanyReview"]] = relationship(back_populates="client")
+
+
+class WarehouseItem(Base):
+    """Товар или расходник на складе компании"""
+
+    __tablename__ = "warehouse_items"
+    __table_args__ = (
+        UniqueConstraint("company_id", "id", name="uq_warehouse_item_tenant"),
+        UniqueConstraint("company_id", "sku", name="uq_warehouse_item_sku"),
+        Index("ix_warehouse_items_company_id", "company_id"),
+        Index("ix_warehouse_items_item_type", "item_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    item_type: Mapped[WarehouseItemType] = mapped_column(
+        Enum(WarehouseItemType, name="warehouse_item_type"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    unit: Mapped[str] = mapped_column(String(20), default="шт", nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    min_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    company: Mapped["Company"] = relationship(back_populates="warehouse_items")
+    stock_balances: Mapped[list["WarehouseStock"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan"
+    )
+    movements: Mapped[list["WarehouseMovement"]] = relationship(back_populates="item")
     created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
+
+
+class WarehouseStock(Base):
+    """Остаток позиции на складе (основной или филиал)"""
+
+    __tablename__ = "warehouse_stock"
+    __table_args__ = (
+        UniqueConstraint("company_id", "item_id", "branch_id", name="uq_warehouse_stock_location"),
+        Index("ix_warehouse_stock_company_id", "company_id"),
+        Index("ix_warehouse_stock_item_id", "item_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("warehouse_items.id"), nullable=False)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True
+    )
+    quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    item: Mapped["WarehouseItem"] = relationship(back_populates="stock_balances")
+    branch: Mapped["Branch | None"] = relationship(foreign_keys=[branch_id])
+
+
+class WarehouseMovement(Base):
+    """Движение по складу: приход, расход, корректировка, перемещение"""
+
+    __tablename__ = "warehouse_movements"
+    __table_args__ = (
+        Index("ix_warehouse_movements_company_id", "company_id"),
+        Index("ix_warehouse_movements_item_id", "item_id"),
+        Index("ix_warehouse_movements_created_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("warehouse_items.id"), nullable=False)
+    movement_type: Mapped[StockMovementType] = mapped_column(
+        Enum(StockMovementType, name="stock_movement_type"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True
+    )
+    from_branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True
+    )
+    to_branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True
+    )
+    quantity_before: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quantity_after: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    item: Mapped["WarehouseItem"] = relationship(back_populates="movements")
+    created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
+
+
+class CompanyReview(Base):
+    """Отзыв клиента о компании с опциональной привязкой к мастеру"""
+
+    __tablename__ = "company_reviews"
+    __table_args__ = (
+        Index("ix_company_reviews_company_id", "company_id"),
+        Index("ix_company_reviews_member_id", "member_id"),
+        Index("ix_company_reviews_created_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_clients.id"), nullable=False
+    )
+    member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_members.id"), nullable=True
+    )
+    client_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    is_visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    company: Mapped["Company"] = relationship(back_populates="reviews")
+    client: Mapped["CompanyClient"] = relationship(back_populates="reviews")
+    member: Mapped["CompanyMember | None"] = relationship(foreign_keys=[member_id])

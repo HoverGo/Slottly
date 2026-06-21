@@ -14,6 +14,9 @@ from app.schemas.services import (
     AppointmentCreate,
     AppointmentResponse,
     AppointmentUpdate,
+    ClientAppointmentHistoryItem,
+    ClientHistoryResponse,
+    CompanyClientResponse,
     CompanyServiceCreate,
     CompanyServiceResponse,
     CompanyServiceUpdate,
@@ -26,10 +29,19 @@ from app.services.appointment_service import (
     list_member_appointments,
     update_appointment,
 )
+from app.services.client_service import (
+    appointment_history_item,
+    client_to_dict,
+    count_client_appointments,
+    get_client_by_id,
+    get_client_by_phone,
+    list_client_appointments,
+)
 from app.services.service_catalog_service import (
     create_company_service,
     get_company_service,
     list_company_services,
+    service_to_response,
     update_company_service,
 )
 
@@ -47,13 +59,16 @@ async def create_service(
             db,
             tenant,
             name=data.name,
+            category=data.category,
             description=data.description,
             duration_minutes=data.duration_minutes,
+            buffer_before_minutes=data.buffer_before_minutes,
+            buffer_after_minutes=data.buffer_after_minutes,
             price=data.price,
             member_id=data.member_id,
             branch_id=data.branch_id,
         )
-        return CompanyServiceResponse.model_validate(service)
+        return CompanyServiceResponse(**service_to_response(service))
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -68,7 +83,7 @@ async def list_services(
     services = await list_company_services(
         db, tenant.company_id, active_only=active_only, member_id=member_id
     )
-    return [CompanyServiceResponse.model_validate(s) for s in services]
+    return [CompanyServiceResponse(**service_to_response(s)) for s in services]
 
 
 @router.get("/services/{service_id}", response_model=CompanyServiceResponse)
@@ -79,7 +94,7 @@ async def get_service(
 ) -> CompanyServiceResponse:
     try:
         service = await get_company_service(db, tenant.company_id, service_id)
-        return CompanyServiceResponse.model_validate(service)
+        return CompanyServiceResponse(**service_to_response(service))
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -97,16 +112,20 @@ async def update_service(
             tenant,
             service_id,
             name=data.name,
+            category=data.category,
             description=data.description,
             duration_minutes=data.duration_minutes,
+            buffer_before_minutes=data.buffer_before_minutes,
+            buffer_after_minutes=data.buffer_after_minutes,
             price=data.price,
             member_id=data.member_id,
             branch_id=data.branch_id,
             is_active=data.is_active,
             clear_member=data.clear_member,
             clear_branch=data.clear_branch,
+            clear_category=data.clear_category,
         )
-        return CompanyServiceResponse.model_validate(service)
+        return CompanyServiceResponse(**service_to_response(service))
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -130,7 +149,9 @@ async def create_member_appointment(
             service_id=data.service_id,
             starts_at=data.starts_at,
             client_name=data.client_name,
+            client_full_name=data.client_full_name,
             client_phone=data.client_phone,
+            client_email=str(data.client_email) if data.client_email else None,
             note=data.note,
         )
         return AppointmentResponse(**appointment_to_response(appointment))
@@ -194,7 +215,9 @@ async def patch_appointment(
             appointment_id,
             status=status,
             client_name=data.client_name,
+            client_full_name=data.client_full_name,
             client_phone=data.client_phone,
+            client_email=str(data.client_email) if data.client_email else None,
             note=data.note,
         )
         return AppointmentResponse(**appointment_to_response(appointment))
@@ -212,5 +235,57 @@ async def delete_appointment(
     try:
         appointment = await cancel_appointment(db, tenant, member_id, appointment_id)
         return AppointmentResponse(**appointment_to_response(appointment))
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/clients/lookup", response_model=CompanyClientResponse)
+async def lookup_client_by_phone(
+    phone: str = Query(..., min_length=5, max_length=50),
+    tenant: TenantContext = Depends(get_company_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> CompanyClientResponse:
+    try:
+        client = await get_client_by_phone(db, tenant.company_id, phone)
+        count = await count_client_appointments(db, tenant.company_id, client.id)
+        return CompanyClientResponse(**client_to_dict(client, appointments_count=count))
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/clients/history", response_model=ClientHistoryResponse)
+async def get_client_history_by_phone(
+    phone: str = Query(..., min_length=5, max_length=50),
+    tenant: TenantContext = Depends(get_company_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> ClientHistoryResponse:
+    try:
+        client = await get_client_by_phone(db, tenant.company_id, phone)
+        appointments = await list_client_appointments(db, tenant.company_id, client.id)
+        return ClientHistoryResponse(
+            client=CompanyClientResponse(**client_to_dict(client, appointments_count=len(appointments))),
+            appointments=[
+                ClientAppointmentHistoryItem(**appointment_history_item(item)) for item in appointments
+            ],
+        )
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/clients/{client_id}/history", response_model=ClientHistoryResponse)
+async def get_client_history(
+    client_id: UUID,
+    tenant: TenantContext = Depends(get_company_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> ClientHistoryResponse:
+    try:
+        client = await get_client_by_id(db, tenant.company_id, client_id)
+        appointments = await list_client_appointments(db, tenant.company_id, client.id)
+        return ClientHistoryResponse(
+            client=CompanyClientResponse(**client_to_dict(client, appointments_count=len(appointments))),
+            appointments=[
+                ClientAppointmentHistoryItem(**appointment_history_item(item)) for item in appointments
+            ],
+        )
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

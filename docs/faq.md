@@ -152,6 +152,17 @@
 
 Если услуга длится 60 минут при интервале слотов 30 минут, после записи на 10:00 слоты 10:00 и 10:30 скрываются как занятые.
 
+### Как пригласить сотрудника без аккаунта?
+
+`POST /companies/{id}/join-requests` с полями `email`, `full_name`, `role_id`, опционально `compensation_type`, `compensation_rate`, `compensation_percent`.
+
+Если пользователя нет в системе, в ответе будет `activation_url`. Сотрудник открывает ссылку, проверяет данные и активирует аккаунт:
+
+- `GET /auth/invites/{token}` — просмотр приглашения
+- `POST /auth/invites/{token}/activate` — задать пароль и войти в компанию
+
+Типы оплаты труда: `percent` (% от услуг, ставка в `compensation_rate`), `salary` (оклад в руб.), `salary_plus_percent` (оклад в `compensation_rate`, % в `compensation_percent`).
+
 ---
 
 ## Технические вопросы

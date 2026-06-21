@@ -7,8 +7,10 @@ from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.exceptions import AppError
 from app.models.entities import User
+from app.schemas.cabinet import InviteActivateRequest, InviteActivateResponse, InvitePreviewResponse
 from app.schemas.schemas import PasswordChange, TokenResponse, UserRegister, UserResponse
 from app.services.auth_service import authenticate_user, change_password, register_user
+from app.services.invite_activation_service import activate_invite, get_invite_by_token, invite_preview_data
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,5 +52,48 @@ async def change_user_password(
 ) -> None:
     try:
         await change_password(db, current_user, data)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/invites/{token}", response_model=InvitePreviewResponse)
+async def preview_invite(token: str, db: AsyncSession = Depends(get_db)) -> InvitePreviewResponse:
+    try:
+        request = await get_invite_by_token(db, token)
+        data = invite_preview_data(request)
+        return InvitePreviewResponse(
+            company_name=data["company_name"] or "",
+            role_name=data["role_name"] or "",
+            invite_email=data["invite_email"] or "",
+            invite_full_name=data["invite_full_name"],
+            invite_phone=data["invite_phone"],
+            invited_by_name=data["invited_by_name"],
+            message=data["message"],
+            compensation_type=data["compensation_type"],
+            compensation_rate=data["compensation_rate"],
+            compensation_percent=data["compensation_percent"],
+            token_expires_at=request.token_expires_at,
+        )
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.post("/invites/{token}/activate", response_model=InviteActivateResponse)
+async def activate_employee_invite(
+    token: str,
+    data: InviteActivateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> InviteActivateResponse:
+    try:
+        user, access_token, member = await activate_invite(
+            db, token, password=data.password, full_name=data.full_name
+        )
+        await db.commit()
+        return InviteActivateResponse(
+            access_token=access_token,
+            user_id=user.id,
+            member_id=member.id,
+            company_id=member.company_id,
+        )
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

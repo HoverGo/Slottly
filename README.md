@@ -67,7 +67,9 @@ PAYMENT_PROVIDER=mock
 
 ### Подписки
 
+- При регистрации выдаётся **бесплатный тариф `basic`**: 3 сотрудника, 5 услуг, 50 записей в месяц
 - Одна **подписка** (`UserSubscription`) = один слот на **одну компанию**
+- Лимиты тарифа: `max_users`, `max_branches`, `max_roles`, `max_services`, `max_appointments_per_month`
 - Покупка: `POST /payments/checkout` с `action: "purchase"`
 - Компания создаётся с привязкой свободной подписки: `POST /companies { subscription_id }`
 - Периоды оплаты: **1, 3, 6, 12** месяцев
@@ -119,6 +121,16 @@ PAYMENT_PROVIDER=mock
 - Запись клиента на услугу блокирует пересекающиеся слоты в расписании
 - Свободные слоты: `GET .../schedules/{id}/slots?service_id=...` — с учётом длительности услуги
 
+### Фото
+
+- **Онлайн-запись:** `PATCH /companies/{id}` с `public_booking_enabled: true` → поле `booking_url`; публичное API `/public/booking/{slug}` (без JWT)
+- **Профиль компании:** `PATCH /companies/{id}` — название, адрес, телефон, тип организации, график работы
+- **Логотип:** `POST/DELETE /companies/{id}/logo` (или `/photo`) — владелец, `manage_company` или `manage_members`
+- **Галерея студии:** `POST/DELETE /companies/{id}/gallery` — до 20 фото
+- **Сотрудник:** `POST/DELETE /companies/{id}/members/{member_id}/photo` — сам сотрудник или менеджер/владелец
+- Просмотр: `GET /api/v1/media/{path}` с JWT (участники компании)
+- Форматы: JPEG, PNG, WebP, до 5 МБ
+
 ### Изоляция компаний
 
 - Все данные компании через `TenantRepository` + `company_id`
@@ -127,11 +139,12 @@ PAYMENT_PROVIDER=mock
 
 ## Тарифы по умолчанию
 
-| code | Лимиты (users / branches / roles) | ₽/мес |
+| code | Лимиты (users / branches / roles) | Услуги / записи в мес | ₽/мес |
 |------|-----------------------------------|-------|
-| `starter` | 10 / 3 / 5 | 990 |
-| `business` | 50 / 10 / 20 | 2990 |
-| `enterprise` | 200 / 50 / 100 | 9990 |
+| `starter` | 10 / 3 / 5 | 20 услуг, 500 записей/мес | 990 |
+| `business` | 50 / 10 / 20 | 100 услуг, 3000 записей/мес | 2990 |
+| `enterprise` | 200 / 50 / 100 | 500 услуг, 20000 записей/мес | 9990 |
+| `basic` | 3 / 1 / 3 | 5 услуг, 50 записей/мес | 0 (при регистрации) |
 
 ## Документация
 
@@ -153,7 +166,7 @@ app/
   repositories/     # TenantRepository
   schemas/          # Pydantic-модели
   services/         # бизнес-логика, payment_providers/
-alembic/versions/   # миграции 001–010
+alembic/versions/   # миграции 001–013
 scripts/            # docker_entrypoint.py
 docs/
 ```
@@ -173,7 +186,7 @@ docs/
 
 ## Админ платформы
 
-Пользователь с `is_platform_admin: true` (через `PLATFORM_ADMIN_EMAILS` или API) получает доступ к `/api/v1/admin/*`: дашборд, пользователи, компании, промокоды, назначение роли техподдержки.
+Пользователь с `is_platform_admin: true` получает доступ к `/api/v1/admin/*`: дашборд, пользователи, компании (с подписками и оплатой), объявления о техработах, промокоды, назначение роли техподдержки.
 
 ## Техподдержка платформы
 

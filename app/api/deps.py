@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.permissions import VIEW_STATISTICS
 from app.core.tenant import TenantContext, set_tenant_context
 from app.models.entities import Company, CompanyMember, User
 
@@ -87,6 +88,15 @@ def require_permission(permission: str):
         if not tenant.has_permission(permission):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Компания не найдена")
         return tenant
+
+    return _checker
+
+
+def require_statistics_access():
+    async def _checker(tenant: TenantContext = Depends(get_company_tenant)) -> TenantContext:
+        if tenant.is_owner or tenant.has_permission(VIEW_STATISTICS):
+            return tenant
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Компания не найдена")
 
     return _checker
 

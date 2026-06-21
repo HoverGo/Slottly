@@ -91,11 +91,15 @@ async def get_schedule_slots(
         )
 
         booking_duration: int | None = None
+        buffer_before = 0
+        buffer_after = 0
         if service_id is not None:
             service = await get_company_service(db, tenant.company_id, service_id)
             if service.member_id is not None and service.member_id != member_id:
                 raise AppError("Услуга привязана к другому специалисту")
             booking_duration = service.duration_minutes
+            buffer_before = service.buffer_before_minutes
+            buffer_after = service.buffer_after_minutes
 
         slots = generate_slots_range(
             schedule,
@@ -104,6 +108,8 @@ async def get_schedule_slots(
             exceptions,
             appointments=appointments,
             booking_duration_minutes=booking_duration,
+            buffer_before_minutes=buffer_before,
+            buffer_after_minutes=buffer_after,
         )
         return WorkScheduleSlotsResponse(
             schedule_id=schedule.id,
@@ -112,6 +118,8 @@ async def get_schedule_slots(
             to_date=to_date,
             service_id=service_id,
             booking_duration_minutes=booking_duration,
+            buffer_before_minutes=buffer_before if service_id else None,
+            buffer_after_minutes=buffer_after if service_id else None,
             slots_by_day=slots,
         )
     except AppError as exc:

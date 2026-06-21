@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     platform_admin_emails: str = ""
     platform_support_emails: str = ""
     payment_return_url: str = "http://localhost:8000/cabinet/payments/success"
+    upload_dir: str = "uploads"
+    max_upload_size_mb: int = 5
+    media_url_prefix: str = "/api/v1/media"
+    invite_base_url: str = "http://localhost:8000/invite"
+    invite_token_expire_days: int = 7
+    public_booking_base_url: str = "http://localhost:8000/book"
 
     @property
     def platform_admin_emails_list(self) -> list[str]:
