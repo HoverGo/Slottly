@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.models.enums import PaymentAction
 from app.schemas.schemas import SubscriptionPlanResponse, UserResponse
@@ -29,6 +29,7 @@ class AdminUserResponse(BaseModel):
     is_active: bool
     is_platform_admin: bool
     is_platform_support: bool
+    is_platform_main_admin: bool
     created_at: datetime
 
 
@@ -141,6 +142,10 @@ class PlatformSupportUpdate(BaseModel):
     is_platform_support: bool
 
 
+class PlatformMainAdminUpdate(BaseModel):
+    is_platform_main_admin: bool
+
+
 class PaymentCheckoutPreviewRequest(BaseModel):
     plan_code: str = Field(min_length=1, max_length=50)
     action: PaymentAction
@@ -163,31 +168,55 @@ class PaymentCheckoutPreviewResponse(BaseModel):
     promotion_id: UUID | None = None
     promotion_name: str | None = None
     promotion_applied: bool = False
+    custom_offer_applied: bool = False
+    custom_offer_name: str | None = None
+
+
+class PromotionCompanyRef(BaseModel):
+    id: UUID
+    name: str
 
 
 class SubscriptionPromotionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    discount_percent: int = Field(ge=1, le=100)
-    plan_codes: list[str] | None = None
-    actions: list[PaymentAction] | None = None
+    plan_code: str = Field(min_length=1, max_length=50)
+    period_months: Literal[1, 3, 6, 12]
+    promotional_amount: int = Field(ge=1, description="Итоговая стоимость за период, ниже базовой")
     for_all_companies: bool = True
-    company_ids: list[UUID] | None = None
-    first_plan_purchase_only: bool = False
+    company_ids: list[UUID] | None = Field(
+        default=None,
+        description="UUID компаний, если for_all_companies=false. Список id из GET /admin/companies",
+    )
+    new_companies_only: bool = False
+    is_active: bool = True
     max_uses: int | None = Field(default=None, ge=1)
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     description: str | None = Field(default=None, max_length=500)
 
+    @model_validator(mode="after")
+    def validate_company_scope(self) -> "SubscriptionPromotionCreate":
+        if self.for_all_companies:
+            return self
+        if not self.company_ids:
+            raise ValueError("Укажите company_ids — id компаний, для которых действует акция")
+        if len(self.company_ids) != len(set(self.company_ids)):
+            raise ValueError("company_ids не должны содержать дубликаты")
+        return self
+
 
 class SubscriptionPromotionUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    discount_percent: int | None = Field(default=None, ge=1, le=100)
-    plan_codes: list[str] | None = None
-    actions: list[PaymentAction] | None = None
+    plan_code: str | None = Field(default=None, min_length=1, max_length=50)
+    period_months: Literal[1, 3, 6, 12] | None = None
+    promotional_amount: int | None = Field(default=None, ge=1)
     for_all_companies: bool | None = None
-    company_ids: list[UUID] | None = None
+    company_ids: list[UUID] | None = Field(
+        default=None,
+        description="UUID компаний, если акция не для всех",
+    )
     clear_company_ids: bool = False
-    first_plan_purchase_only: bool | None = None
+    new_companies_only: bool | None = None
     max_uses: int | None = Field(default=None, ge=1)
     valid_from: datetime | None = None
     valid_until: datetime | None = None
@@ -196,18 +225,32 @@ class SubscriptionPromotionUpdate(BaseModel):
     is_active: bool | None = None
     description: str | None = Field(default=None, max_length=500)
 
+    @model_validator(mode="after")
+    def validate_company_scope(self) -> "SubscriptionPromotionUpdate":
+        if self.company_ids and len(self.company_ids) != len(set(self.company_ids)):
+            raise ValueError("company_ids не должны содержать дубликаты")
+        if self.for_all_companies is False and not self.company_ids and not self.clear_company_ids:
+            raise ValueError(
+                "При for_all_companies=false укажите company_ids — id выбранных компаний"
+            )
+        return self
+
 
 class SubscriptionPromotionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     name: str
-    discount_percent: int
-    plan_codes: list[str] | None
-    actions: list[str] | None
+    plan_code: str
+    period_months: int
+    promotional_amount: int
     for_all_companies: bool
     company_ids: list[str] | None
-    first_plan_purchase_only: bool
+    companies: list[PromotionCompanyRef] = Field(
+        default_factory=list,
+        description="Выбранные компании (id и название), если акция не для всех",
+    )
+    new_companies_only: bool
     max_uses: int | None
     used_count: int
     valid_from: datetime | None

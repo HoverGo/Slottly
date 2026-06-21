@@ -37,6 +37,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_platform_admin: bool = False
     is_platform_support: bool = False
+    is_platform_main_admin: bool = False
     created_at: datetime
 
 
@@ -231,8 +232,14 @@ class BranchResponse(BaseModel):
 class SubscriptionPlanPromotionInfo(BaseModel):
     id: UUID
     name: str
-    discount_percent: int
-    first_plan_purchase_only: bool = False
+    period_months: int
+    original_amount: int
+    promotional_amount: int
+    new_companies_only: bool = False
+
+
+class SubscriptionPlanPeriodPromotion(SubscriptionPlanPromotionInfo):
+    pass
 
 
 class SubscriptionPlanResponse(BaseModel):
@@ -250,9 +257,10 @@ class SubscriptionPlanResponse(BaseModel):
     price_monthly: int
     promotional_price_monthly: int | None = Field(
         default=None,
-        description="Цена за месяц с учётом активной акции",
+        description="Цена за месяц по акции на 1 месяц, если есть",
     )
     active_promotion: SubscriptionPlanPromotionInfo | None = None
+    period_promotions: list[SubscriptionPlanPeriodPromotion] = Field(default_factory=list)
 
 
 class SubscriptionLimitsResponse(BaseModel):
@@ -270,3 +278,7 @@ class SubscriptionLimitsResponse(BaseModel):
     expires_at: datetime | None = None
     scheduled_plan_code: str | None = None
     scheduled_change_at: datetime | None = None
+    plan_price_monthly: int | None = None
+    price_monthly: int | None = None
+    has_custom_offer: bool = False
+    custom_offer_name: str | None = None

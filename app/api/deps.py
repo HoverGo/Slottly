@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.permissions import VIEW_STATISTICS
+from app.core.platform_roles import user_can_manage_company_offers, user_is_platform_staff
 from app.core.tenant import TenantContext, set_tenant_context
 from app.models.entities import Company, CompanyMember, User
 
@@ -115,10 +116,21 @@ async def require_platform_admin(
 async def require_platform_staff(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if not (current_user.is_platform_admin or current_user.is_platform_support):
+    if not user_is_platform_staff(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Доступ только для техподдержки или администратора платформы",
+        )
+    return current_user
+
+
+async def require_platform_offer_manager(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not user_can_manage_company_offers(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Доступ только для главного администратора или администратора платформы",
         )
     return current_user
 

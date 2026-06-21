@@ -59,40 +59,45 @@ async def check_subscription_limit(
     add_services: int = 0,
     add_appointments: int = 0,
 ) -> None:
+    from app.services.company_offer_service import get_effective_limits
+
     subscription = await require_active_subscription(db, company)
-    plan = subscription.plan
+    limits = await get_effective_limits(db, company.id, subscription.plan)
     users, branches, roles = await count_company_entities(db, company.id)
     services = await count_company_services(db, company.id)
     appointments = await count_company_appointments_in_month(db, company.id)
 
-    if users + add_users > plan.max_users:
-        raise ForbiddenError(f"Лимит пользователей ({plan.max_users}) исчерпан")
-    if branches + add_branches > plan.max_branches:
-        raise ForbiddenError(f"Лимит филиалов ({plan.max_branches}) исчерпан")
-    if roles + add_roles > plan.max_roles:
-        raise ForbiddenError(f"Лимит ролей ({plan.max_roles}) исчерпан")
-    if services + add_services > plan.max_services:
-        raise ForbiddenError(f"Лимит услуг ({plan.max_services}) исчерпан")
-    if appointments + add_appointments > plan.max_appointments_per_month:
+    if users + add_users > limits["max_users"]:
+        raise ForbiddenError(f"Лимит пользователей ({limits['max_users']}) исчерпан")
+    if branches + add_branches > limits["max_branches"]:
+        raise ForbiddenError(f"Лимит филиалов ({limits['max_branches']}) исчерпан")
+    if roles + add_roles > limits["max_roles"]:
+        raise ForbiddenError(f"Лимит ролей ({limits['max_roles']}) исчерпан")
+    if services + add_services > limits["max_services"]:
+        raise ForbiddenError(f"Лимит услуг ({limits['max_services']}) исчерпан")
+    if appointments + add_appointments > limits["max_appointments_per_month"]:
         raise ForbiddenError(
-            f"Лимит записей в месяц ({plan.max_appointments_per_month}) исчерпан"
+            f"Лимит записей в месяц ({limits['max_appointments_per_month']}) исчерпан"
         )
 
 
 async def get_subscription_limits(db: AsyncSession, company: Company) -> dict:
+    from app.services.company_offer_service import (
+        get_active_company_subscription_offer,
+        get_effective_limits,
+    )
+
     subscription = await get_company_subscription(db, company.id)
     users, branches, roles = await count_company_entities(db, company.id)
     services = await count_company_services(db, company.id)
     appointments = await count_company_appointments_in_month(db, company.id)
+    offer = await get_active_company_subscription_offer(db, company.id)
 
     if subscription:
         plan = subscription.plan
-        return {
-            "max_users": plan.max_users,
-            "max_branches": plan.max_branches,
-            "max_roles": plan.max_roles,
-            "max_services": plan.max_services,
-            "max_appointments_per_month": plan.max_appointments_per_month,
+        limits = await get_effective_limits(db, company.id, plan)
+        result = {
+            **limits,
             "current_users": users,
             "current_branches": branches,
             "current_roles": roles,
@@ -102,7 +107,12 @@ async def get_subscription_limits(db: AsyncSession, company: Company) -> dict:
             "expires_at": subscription.expires_at,
             "scheduled_plan_code": subscription.scheduled_plan.code if subscription.scheduled_plan else None,
             "scheduled_change_at": subscription.scheduled_change_at,
+            "plan_price_monthly": plan.price_monthly,
+            "price_monthly": offer.price_monthly if offer else plan.price_monthly,
+            "has_custom_offer": offer is not None,
+            "custom_offer_name": (offer.display_name or offer.name) if offer else None,
         }
+        return result
 
     return {
         "max_users": 0,
@@ -119,6 +129,10 @@ async def get_subscription_limits(db: AsyncSession, company: Company) -> dict:
         "expires_at": None,
         "scheduled_plan_code": None,
         "scheduled_change_at": None,
+        "plan_price_monthly": None,
+        "price_monthly": None,
+        "has_custom_offer": offer is not None,
+        "custom_offer_name": (offer.display_name or offer.name) if offer else None,
     }
 
 

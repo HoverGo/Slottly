@@ -256,7 +256,7 @@ Authorization: Bearer <access_token>
 
 Список тарифов с учётом **активных акций** (скидка применяется автоматически, без промокода). Авторизация не требуется.
 
-При активной акции в ответе есть `price_monthly` (без скидки), `promotional_price_monthly` (со скидкой) и `active_promotion`.
+При активной акции в ответе есть `price_monthly` (без скидки), `period_promotions` (акции по срокам 1/3/6/12 мес.), `promotional_price_monthly` и `active_promotion` — для акции на **1 месяц**.
 
 **Ответ `200`:**
 
@@ -266,31 +266,45 @@ Authorization: Bearer <access_token>
     "id": "11111111-1111-1111-1111-111111111111",
     "code": "starter",
     "name": "Стартовый",
-    "description": "До 10 сотрудников, 3 филиала, 5 ролей",
-    "max_users": 10,
-    "max_branches": 3,
-    "max_roles": 5,
-    "max_services": 10,
-    "max_appointments_per_month": 100,
     "price_monthly": 990,
-    "promotional_price_monthly": 792,
+    "promotional_price_monthly": 790,
     "active_promotion": {
-      "id": "promo-uuid",
-      "name": "Старт со скидкой 20%",
-      "discount_percent": 20,
-      "first_plan_purchase_only": false
-    }
+      "id": "promo-uuid-1m",
+      "name": "Старт за 790 ₽/мес",
+      "period_months": 1,
+      "original_amount": 990,
+      "promotional_amount": 790,
+      "new_companies_only": true
+    },
+    "period_promotions": [
+      {
+        "id": "promo-uuid-1m",
+        "name": "Старт за 790 ₽/мес",
+        "period_months": 1,
+        "original_amount": 990,
+        "promotional_amount": 790,
+        "new_companies_only": true
+      },
+      {
+        "id": "promo-uuid-3m",
+        "name": "Старт на 3 месяца",
+        "period_months": 3,
+        "original_amount": 2970,
+        "promotional_amount": 2370,
+        "new_companies_only": true
+      }
+    ]
   }
 ]
 ```
 
-Если акции нет — `promotional_price_monthly` и `active_promotion` равны `null`.
+Если акций нет — `promotional_price_monthly`, `active_promotion` и `period_promotions` пустые.
 
 ---
 
 ### `GET /api/v1/companies/{company_id}/subscription/available-plans`
 
-Тарифы, доступные для смены с учётом текущего использования и **активных акций** для этой компании (включая проверку «первая покупка тарифа»). Только владелец. Требуется JWT.
+Тарифы, доступные для смены с учётом текущего использования и **активных акций** для этой компании (включая проверку «только для новых компаний»). Только владелец. Требуется JWT.
 
 **Ответ `200`:** массив `SubscriptionPlanResponse` (см. поля `promotional_price_monthly`, `active_promotion`).
 
@@ -313,7 +327,7 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Ответ `200` — акция применена автоматически:**
+**Ответ `200` — акция на 3 месяца применена автоматически:**
 
 ```json
 {
@@ -321,25 +335,28 @@ Authorization: Bearer <access_token>
     "code": "starter",
     "name": "Стартовый",
     "price_monthly": 990,
-    "promotional_price_monthly": 792,
-    "active_promotion": {
-      "id": "promo-uuid",
-      "name": "Старт со скидкой 20%",
-      "discount_percent": 20,
-      "first_plan_purchase_only": true
-    }
+    "period_promotions": [
+      {
+        "id": "promo-uuid-3m",
+        "name": "Старт на 3 месяца",
+        "period_months": 3,
+        "original_amount": 2970,
+        "promotional_amount": 2370,
+        "new_companies_only": true
+      }
+    ]
   },
   "action": "purchase",
   "period_months": 3,
   "original_amount": 2970,
-  "discount_amount": 594,
-  "amount": 2376,
+  "discount_amount": 600,
+  "amount": 2370,
   "currency": "RUB",
   "promo_code": null,
   "promo_applied": false,
   "promo_error": null,
-  "promotion_id": "promo-uuid",
-  "promotion_name": "Старт со скидкой 20%",
+  "promotion_id": "promo-uuid-3m",
+  "promotion_name": "Старт на 3 месяца",
   "promotion_applied": true
 }
 ```
@@ -542,6 +559,25 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
 
 ---
 
+### `PATCH /api/v1/admin/users/{user_id}/platform-main-admin`
+
+Назначить или снять роль **главного администратора** платформы. Только `is_platform_admin`.
+
+Главный администратор:
+- имеет доступ к `/api/v1/admin/support/*` (как техподдержка)
+- может управлять **индивидуальными предложениями** для компаний (`/admin/company-subscription-offers`, `/admin/companies/{id}/subscription-offer`)
+- **не** имеет доступа к промокодам, акциям, объявлениям и назначению ролей (только полный `is_platform_admin`)
+
+**Запрос:**
+
+```json
+{ "is_platform_main_admin": true }
+```
+
+**Ответ `200`:** `AdminUserResponse` с полем `is_platform_main_admin`.
+
+---
+
 ### `GET /api/v1/admin/users`
 
 Список пользователей. Query: `limit` (1–200, по умолчанию 50), `offset`.
@@ -557,6 +593,7 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
     "is_active": true,
     "is_platform_admin": false,
     "is_platform_support": false,
+    "is_platform_main_admin": false,
     "created_at": "2026-06-17T12:00:00+00:00"
   }
 ]
@@ -745,33 +782,33 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
 
 ## Акции на подписки — `/api/v1/admin/subscription-promotions`
 
-**Акции** в отличие от промокодов применяются **автоматически**: пользователь видит `price_monthly` и `promotional_price_monthly` в списке тарифов и при checkout без ввода кода.
+**Акции** в отличие от промокодов применяются **автоматически**. Каждая акция задаёт **конкретный тариф**, **срок оплаты** (1, 3, 6 или 12 мес.) и **фиксированную стоимость** за этот период (ниже базовой).
+
+Для другого срока создаётся **отдельная акция** с теми же условиями, но другим `period_months` и `promotional_amount`.
 
 Доступ: platform admin.
 
 ### `GET /api/v1/admin/subscription-promotions`
-
-Список акций.
 
 **Ответ `200`:**
 
 ```json
 [
   {
-    "id": "promo-uuid",
-    "name": "Старт со скидкой 20%",
-    "discount_percent": 20,
-    "plan_codes": ["starter"],
-    "actions": ["purchase"],
+    "id": "promo-uuid-1m",
+    "name": "Старт за 790 ₽/мес",
+    "plan_code": "starter",
+    "period_months": 1,
+    "promotional_amount": 790,
     "for_all_companies": true,
     "company_ids": null,
-    "first_plan_purchase_only": true,
+    "new_companies_only": true,
     "max_uses": null,
     "used_count": 5,
     "valid_from": null,
     "valid_until": "2026-09-01T00:00:00+00:00",
     "is_active": true,
-    "description": "Скидка на первую покупку тарифа",
+    "description": "Для новых компаний",
     "created_by_id": "admin-uuid",
     "created_at": "2026-06-17T10:00:00+00:00"
   }
@@ -782,43 +819,118 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
 
 Создание акции. Ответ `201`.
 
-**Для всех организаций, только первая покупка тарифа:**
+**Starter, 1 месяц, только новые компании, для всех организаций:**
 
 ```json
 {
-  "name": "Старт со скидкой 20%",
-  "discount_percent": 20,
-  "plan_codes": ["starter"],
-  "actions": ["purchase"],
+  "name": "Старт за 790 ₽/мес",
+  "plan_code": "starter",
+  "period_months": 1,
+  "promotional_amount": 790,
   "for_all_companies": true,
-  "first_plan_purchase_only": true,
-  "valid_until": "2026-09-01T00:00:00Z",
-  "description": "Скидка при первой покупке тарифа у компании"
+  "new_companies_only": true,
+  "is_active": true,
+  "valid_until": "2026-09-01T00:00:00Z"
 }
 ```
 
-**Для выбранных компаний** (`for_all_companies: false`, обязателен `company_ids`):
+**Тот же тариф на 3 месяца — отдельная акция:**
 
 ```json
 {
-  "name": "Партнёрская скидка",
-  "discount_percent": 15,
+  "name": "Старт на 3 месяца",
+  "plan_code": "starter",
+  "period_months": 3,
+  "promotional_amount": 2370,
+  "for_all_companies": true,
+  "new_companies_only": true,
+  "is_active": true
+}
+```
+
+**Для выбранных организаций** (`for_all_companies: false`, обязателен `company_ids` — uuid из `GET /admin/companies`):
+
+```json
+{
+  "name": "Партнёрская цена",
+  "plan_code": "business",
+  "period_months": 6,
+  "promotional_amount": 15000,
   "for_all_companies": false,
-  "company_ids": ["company-uuid-1", "company-uuid-2"]
+  "company_ids": [
+    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+  ],
+  "new_companies_only": false,
+  "is_active": true
+}
+```
+
+В ответе акции поле `companies` дублирует выбор с названиями: `[{ "id": "...", "name": "ООО Ромашка" }]`.
+
+| Поле | Описание |
+|------|----------|
+| `plan_code` | Тариф: `starter`, `business`, `enterprise` |
+| `period_months` | Срок: `1`, `3`, `6` или `12` |
+| `promotional_amount` | Итоговая цена за период; должна быть **ниже** `price_monthly × period_months` |
+| `for_all_companies` | `true` — для всех организаций; `false` — только для списка `company_ids` |
+| `company_ids` | Массив UUID компаний; обязателен при `for_all_companies: false` |
+| `companies` | В ответе: id и название выбранных компаний |
+| `new_companies_only` | `true` — только для компаний без успешных оплат подписки |
+| `is_active` | Активна ли акция |
+
+### `PATCH /api/v1/admin/subscription-promotions/{promotion_id}`
+
+Обновление акции (стоимость, срок, `is_active`, список компаний). Ответ `200`: `SubscriptionPromotionResponse`.
+
+---
+
+## Индивидуальные предложения компаниям — `/api/v1/admin/companies/{company_id}/subscription-offer`
+
+Уникальный тариф для **конкретной организации**: свои лимиты и своя цена за месяц (ниже базовой). Применяется автоматически при продлении/оплате подписки компании.
+
+Доступ: `is_platform_admin` или `is_platform_main_admin`.
+
+### `GET /api/v1/admin/company-subscription-offers`
+
+Список всех индивидуальных предложений.
+
+### `GET /api/v1/admin/companies/{company_id}/subscription-offer`
+
+Предложение для компании. Если не задано — `404`.
+
+### `PUT /api/v1/admin/companies/{company_id}/subscription-offer`
+
+Создать или полностью заменить предложение. Ответ `200`.
+
+```json
+{
+  "name": "Индивидуальный тариф ООО Ромашка",
+  "display_name": "Специальные условия",
+  "price_monthly": 1490,
+  "max_users": 25,
+  "max_branches": 5,
+  "max_roles": 10,
+  "max_services": 50,
+  "max_appointments_per_month": 500,
+  "base_plan_code": "business",
+  "is_active": true,
+  "description": "Договорённость от июня 2026"
 }
 ```
 
 | Поле | Описание |
 |------|----------|
-| `for_all_companies` | `true` — акция для всех организаций |
-| `first_plan_purchase_only` | `true` — только если компания ещё не оплачивала этот тариф |
-| `plan_codes` | `null` — все тарифы |
-| `actions` | `null` — все типы оплаты |
-| `company_ids` | UUID компаний, если `for_all_companies: false` |
+| `price_monthly` | Индивидуальная цена за месяц; должна быть **ниже** базовой (`base_plan_code` или текущего тарифа компании) |
+| `max_*` | Лимиты компании вместо лимитов тарифа; не могут быть ниже текущего использования |
+| `display_name` | Название для владельца компании в личном кабинете |
+| `is_active` | Активно ли предложение |
 
-### `PATCH /api/v1/admin/subscription-promotions/{promotion_id}`
+Владелец компании видит лимиты и цену в `GET /companies/{id}/limits` (`has_custom_offer`, `custom_offer_name`, `price_monthly`).
 
-Обновление акции (скидка, срок, `is_active`, список компаний). Ответ `200`: `SubscriptionPromotionResponse`.
+### `PATCH /api/v1/admin/companies/{company_id}/subscription-offer`
+
+Частичное обновление (цена, лимиты, `is_active`).
 
 ---
 
@@ -875,7 +987,7 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
 
 ## Техподдержка (админка) — `/api/v1/admin/support`
 
-Доступ: `is_platform_support` **или** `is_platform_admin` (`require_platform_staff`). Промокоды и назначение ролей — только у админов.
+Доступ: `is_platform_support`, `is_platform_main_admin` **или** `is_platform_admin` (`require_platform_staff`). Индивидуальные предложения компаниям — у главного админа и админа. Промокоды, акции и назначение ролей — только у полного админа.
 
 Назначение support: `PLATFORM_SUPPORT_EMAILS` при старте или `PATCH /admin/users/{id}/platform-support` (от админа).
 

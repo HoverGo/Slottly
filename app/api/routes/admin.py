@@ -16,10 +16,12 @@ from app.schemas.admin import (
     PlatformAnnouncementCreate,
     PlatformAnnouncementResponse,
     PlatformAnnouncementUpdate,
+    PlatformMainAdminUpdate,
     PlatformSupportUpdate,
     PromoCodeCreate,
     PromoCodeResponse,
     PromoCodeUpdate,
+    PromotionCompanyRef,
     SubscriptionPromotionCreate,
     SubscriptionPromotionResponse,
     SubscriptionPromotionUpdate,
@@ -30,6 +32,7 @@ from app.services.admin_service import (
     list_companies_admin,
     list_users_admin,
     set_user_platform_admin,
+    set_user_platform_main_admin,
     set_user_platform_support,
 )
 from app.services.announcement_service import (
@@ -41,6 +44,7 @@ from app.services.promo_service import create_promo_code, list_promo_codes, upda
 from app.services.promotion_service import (
     create_subscription_promotion,
     list_subscription_promotions,
+    load_promotion_companies,
     update_subscription_promotion,
 )
 
@@ -113,6 +117,20 @@ async def admin_set_platform_support(
 ) -> AdminUserResponse:
     try:
         user = await set_user_platform_support(db, user_id, data.is_platform_support)
+        return AdminUserResponse.model_validate(user)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.patch("/users/{user_id}/platform-main-admin", response_model=AdminUserResponse)
+async def admin_set_platform_main_admin(
+    user_id: UUID,
+    data: PlatformMainAdminUpdate,
+    _: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserResponse:
+    try:
+        user = await set_user_platform_main_admin(db, user_id, data.is_platform_main_admin)
         return AdminUserResponse.model_validate(user)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -273,16 +291,18 @@ async def admin_update_promo_code(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
-def _promotion_to_response(promotion) -> SubscriptionPromotionResponse:
+async def _promotion_to_response(db: AsyncSession, promotion) -> SubscriptionPromotionResponse:
+    companies = await load_promotion_companies(db, promotion)
     return SubscriptionPromotionResponse(
         id=promotion.id,
         name=promotion.name,
-        discount_percent=promotion.discount_percent,
-        plan_codes=promotion.plan_codes,
-        actions=promotion.actions,
+        plan_code=promotion.plan_code,
+        period_months=promotion.period_months,
+        promotional_amount=promotion.promotional_amount,
         for_all_companies=promotion.for_all_companies,
         company_ids=promotion.company_ids,
-        first_plan_purchase_only=promotion.first_plan_purchase_only,
+        companies=[PromotionCompanyRef(**item) for item in companies],
+        new_companies_only=promotion.new_companies_only,
         max_uses=promotion.max_uses,
         used_count=promotion.used_count,
         valid_from=promotion.valid_from,
@@ -300,7 +320,10 @@ async def admin_list_subscription_promotions(
     db: AsyncSession = Depends(get_db),
 ) -> list[SubscriptionPromotionResponse]:
     items = await list_subscription_promotions(db)
-    return [_promotion_to_response(item) for item in items]
+    result = []
+    for item in items:
+        result.append(await _promotion_to_response(db, item))
+    return result
 
 
 @router.post("/subscription-promotions", response_model=SubscriptionPromotionResponse, status_code=201)
@@ -314,18 +337,19 @@ async def admin_create_subscription_promotion(
             db,
             admin,
             name=data.name,
-            discount_percent=data.discount_percent,
-            plan_codes=data.plan_codes,
-            actions=[action.value for action in data.actions] if data.actions else None,
+            plan_code=data.plan_code,
+            period_months=data.period_months,
+            promotional_amount=data.promotional_amount,
             for_all_companies=data.for_all_companies,
             company_ids=data.company_ids,
-            first_plan_purchase_only=data.first_plan_purchase_only,
+            new_companies_only=data.new_companies_only,
+            is_active=data.is_active,
             max_uses=data.max_uses,
             valid_from=data.valid_from,
             valid_until=data.valid_until,
             description=data.description,
         )
-        return _promotion_to_response(promotion)
+        return await _promotion_to_response(db, promotion)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -342,13 +366,13 @@ async def admin_update_subscription_promotion(
             db,
             promotion_id,
             name=data.name,
-            discount_percent=data.discount_percent,
-            plan_codes=data.plan_codes,
-            actions=[action.value for action in data.actions] if data.actions is not None else None,
+            plan_code=data.plan_code,
+            period_months=data.period_months,
+            promotional_amount=data.promotional_amount,
             for_all_companies=data.for_all_companies,
             company_ids=data.company_ids,
             clear_company_ids=data.clear_company_ids,
-            first_plan_purchase_only=data.first_plan_purchase_only,
+            new_companies_only=data.new_companies_only,
             max_uses=data.max_uses,
             valid_from=data.valid_from,
             valid_until=data.valid_until,
@@ -357,6 +381,6 @@ async def admin_update_subscription_promotion(
             clear_valid_from=data.clear_valid_from,
             clear_valid_until=data.clear_valid_until,
         )
-        return _promotion_to_response(promotion)
+        return await _promotion_to_response(db, promotion)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

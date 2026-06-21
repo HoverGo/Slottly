@@ -123,6 +123,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_platform_support: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_platform_main_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     owned_companies: Mapped[list["Company"]] = relationship(back_populates="owner")
@@ -273,18 +274,18 @@ class PromoCode(Base):
 
 
 class SubscriptionPromotion(Base):
-    """Акция на подписку: скидка применяется автоматически без промокода"""
+    """Акция на подписку: фиксированная цена за период, применяется автоматически"""
 
     __tablename__ = "subscription_promotions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
-    plan_codes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
-    actions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    period_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    promotional_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     for_all_companies: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     company_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
-    first_plan_purchase_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    new_companies_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
     used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -350,6 +351,43 @@ class Company(Base):
     reviews: Mapped[list["CompanyReview"]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
+    subscription_offer: Mapped["CompanySubscriptionOffer | None"] = relationship(
+        back_populates="company", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class CompanySubscriptionOffer(Base):
+    """Индивидуальное предложение подписки для компании"""
+
+    __tablename__ = "company_subscription_offers"
+    __table_args__ = (
+        UniqueConstraint("company_id", name="uq_company_subscription_offer_company"),
+        Index("ix_company_subscription_offers_company_id", "company_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    price_monthly: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_users: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_branches: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_roles: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_services: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_appointments_per_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_plan_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    company: Mapped["Company"] = relationship(back_populates="subscription_offer")
+    created_by: Mapped["User"] = relationship(foreign_keys=[created_by_id])
 
 
 class CompanyRequisites(Base):

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import admin, admin_support, announcements, auth, cabinet, companies, dashboard, media, payments, permissions, public_booking, public_media, reviews, schedules, services, support, warehouse
+from app.api.routes import admin, admin_company_offers, admin_support, announcements, auth, cabinet, companies, dashboard, media, payments, permissions, public_booking, public_media, reviews, schedules, services, support, warehouse
 from app.core.database import async_session_factory
 from app.core.exceptions import AppError
 from app.services.seed_service import (
@@ -40,6 +40,7 @@ async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(admin_company_offers.router, prefix="/api/v1")
 app.include_router(announcements.router, prefix="/api/v1")
 app.include_router(admin_support.router, prefix="/api/v1")
 app.include_router(support.router, prefix="/api/v1")

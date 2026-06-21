@@ -159,3 +159,16 @@ async def set_user_platform_support(
     user.is_platform_support = is_platform_support
     await db.flush()
     return user
+
+
+async def set_user_platform_main_admin(
+    db: AsyncSession, user_id: UUID, is_platform_main_admin: bool
+) -> User:
+    user = await db.get(User, user_id)
+    if not user:
+        from app.core.exceptions import NotFoundError
+
+        raise NotFoundError("Пользователь не найден")
+    user.is_platform_main_admin = is_platform_main_admin
+    await db.flush()
+    return user

@@ -6,11 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AppError, ForbiddenError, NotFoundError
+from app.core.platform_roles import user_is_platform_staff
 from app.models.entities import SupportTicket, SupportTicketMessage, SupportTicketStatus, User
-
-
-def user_is_platform_staff(user: User) -> bool:
-    return user.is_platform_admin or user.is_platform_support
 
 
 CLOSED_STATUSES = frozenset({SupportTicketStatus.RESOLVED, SupportTicketStatus.CLOSED})

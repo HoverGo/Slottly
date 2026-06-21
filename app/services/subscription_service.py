@@ -151,6 +151,12 @@ async def get_company_usage(db: AsyncSession, company_id: UUID) -> tuple[int, in
 async def validate_plan_for_company(
     db: AsyncSession, company_id: UUID, plan: SubscriptionPlan
 ) -> None:
+    from app.services.company_offer_service import get_active_company_subscription_offer
+
+    offer = await get_active_company_subscription_offer(db, company_id)
+    if offer:
+        return
+
     users, branches, roles = await get_company_usage(db, company_id)
     if not plan_fits_usage(plan, users, branches, roles):
         raise ForbiddenError(

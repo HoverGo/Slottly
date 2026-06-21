@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError, ConflictError, NotFoundError
@@ -13,31 +13,34 @@ from app.models.entities import (
     User,
     UserSubscription,
 )
-from app.models.enums import PaymentAction
+from app.models.enums import PaymentAction, VALID_BILLING_MONTHS
 from app.services.company_service import get_plan_by_code
-from app.services.promo_service import calculate_discount
+from app.services.subscription_service import calculate_price
 
 
-async def company_had_successful_plan_payment(
-    db: AsyncSession, company_id: UUID, plan_id: UUID
-) -> bool:
+async def company_had_any_successful_payment(db: AsyncSession, company_id: UUID) -> bool:
     count = await db.scalar(
         select(func.count())
         .select_from(Payment)
-        .join(
-            UserSubscription,
-            or_(
-                UserSubscription.id == Payment.user_subscription_id,
-                UserSubscription.payment_id == Payment.id,
-            ),
-        )
+        .join(UserSubscription, UserSubscription.id == Payment.user_subscription_id)
         .where(
             Payment.status == PaymentStatus.SUCCEEDED,
-            Payment.plan_id == plan_id,
             UserSubscription.company_id == company_id,
         )
     )
-    return (count or 0) > 0
+    if (count or 0) > 0:
+        return True
+
+    initial_count = await db.scalar(
+        select(func.count())
+        .select_from(Payment)
+        .join(UserSubscription, UserSubscription.payment_id == Payment.id)
+        .where(
+            Payment.status == PaymentStatus.SUCCEEDED,
+            UserSubscription.company_id == company_id,
+        )
+    )
+    return (initial_count or 0) > 0
 
 
 def _promotion_matches_company(promotion: SubscriptionPromotion, company_id: UUID | None) -> bool:
@@ -50,18 +53,17 @@ def _promotion_matches_company(promotion: SubscriptionPromotion, company_id: UUI
     return str(company_id) in promotion.company_ids
 
 
-async def _promotion_matches_first_purchase(
+async def _promotion_matches_new_company(
     db: AsyncSession,
     promotion: SubscriptionPromotion,
     *,
     company_id: UUID | None,
-    plan_id: UUID,
 ) -> bool:
-    if not promotion.first_plan_purchase_only:
+    if not promotion.new_companies_only:
         return True
     if company_id is None:
         return True
-    return not await company_had_successful_plan_payment(db, company_id, plan_id)
+    return not await company_had_any_successful_payment(db, company_id)
 
 
 def _promotion_is_active_now(promotion: SubscriptionPromotion) -> bool:
@@ -77,39 +79,75 @@ def _promotion_is_active_now(promotion: SubscriptionPromotion) -> bool:
     return True
 
 
+def promotion_base_amount(plan: SubscriptionPlan, promotion: SubscriptionPromotion) -> int:
+    return calculate_price(plan, promotion.period_months)
+
+
 async def validate_promotion_for_checkout(
     db: AsyncSession,
     promotion: SubscriptionPromotion,
     *,
     plan: SubscriptionPlan,
     action: PaymentAction,
+    period_months: int,
     company_id: UUID | None,
 ) -> None:
+    if action != PaymentAction.PURCHASE:
+        raise AppError("Акция применима только к покупке подписки")
+
     if not _promotion_is_active_now(promotion):
         raise AppError("Акция неактивна или недоступна")
 
-    if promotion.plan_codes and plan.code not in promotion.plan_codes:
+    if promotion.plan_code != plan.code:
         raise AppError("Акция не применима к выбранному тарифу")
 
-    if promotion.actions and action.value not in promotion.actions:
-        raise AppError("Акция не применима к этому типу оплаты")
+    if promotion.period_months != period_months:
+        raise AppError("Акция не применима к выбранному сроку оплаты")
 
     if not _promotion_matches_company(promotion, company_id):
         raise AppError("Акция недоступна для этой организации")
 
-    if not await _promotion_matches_first_purchase(
-        db, promotion, company_id=company_id, plan_id=plan.id
-    ):
-        raise AppError("Акция только для первой покупки этого тарифа у организации")
+    if not await _promotion_matches_new_company(db, promotion, company_id=company_id):
+        raise AppError("Акция только для новых компаний")
+
+    base_amount = promotion_base_amount(plan, promotion)
+    if promotion.promotional_amount >= base_amount:
+        raise AppError("Стоимость акции должна быть ниже базовой")
 
 
 async def list_active_promotions(db: AsyncSession) -> list[SubscriptionPromotion]:
     result = await db.execute(
         select(SubscriptionPromotion)
         .where(SubscriptionPromotion.is_active.is_(True))
-        .order_by(SubscriptionPromotion.discount_percent.desc(), SubscriptionPromotion.created_at.desc())
+        .order_by(SubscriptionPromotion.created_at.desc())
     )
     return [item for item in result.scalars().all() if _promotion_is_active_now(item)]
+
+
+async def list_eligible_promotions(
+    db: AsyncSession,
+    *,
+    plan: SubscriptionPlan,
+    action: PaymentAction,
+    period_months: int,
+    company_id: UUID | None,
+) -> list[SubscriptionPromotion]:
+    promotions = await list_active_promotions(db)
+    eligible: list[SubscriptionPromotion] = []
+    for promotion in promotions:
+        try:
+            await validate_promotion_for_checkout(
+                db,
+                promotion,
+                plan=plan,
+                action=action,
+                period_months=period_months,
+                company_id=company_id,
+            )
+            eligible.append(promotion)
+        except AppError:
+            continue
+    return eligible
 
 
 async def resolve_best_promotion_for_checkout(
@@ -117,40 +155,54 @@ async def resolve_best_promotion_for_checkout(
     *,
     plan: SubscriptionPlan,
     action: PaymentAction,
+    period_months: int,
     company_id: UUID | None,
 ) -> SubscriptionPromotion | None:
-    promotions = await list_active_promotions(db)
-    eligible: list[SubscriptionPromotion] = []
-    for promotion in promotions:
-        try:
-            await validate_promotion_for_checkout(
-                db, promotion, plan=plan, action=action, company_id=company_id
-            )
-            eligible.append(promotion)
-        except AppError:
-            continue
+    eligible = await list_eligible_promotions(
+        db,
+        plan=plan,
+        action=action,
+        period_months=period_months,
+        company_id=company_id,
+    )
     if not eligible:
         return None
-    return max(eligible, key=lambda item: (item.discount_percent, item.created_at))
+    return min(eligible, key=lambda item: (item.promotional_amount, item.created_at))
 
 
-async def resolve_best_promotion_for_plan_display(
+async def list_eligible_promotions_for_plan_display(
     db: AsyncSession,
     *,
     plan: SubscriptionPlan,
     company_id: UUID | None = None,
-) -> SubscriptionPromotion | None:
-    return await resolve_best_promotion_for_checkout(
-        db,
-        plan=plan,
-        action=PaymentAction.PURCHASE,
-        company_id=company_id,
-    )
+) -> list[SubscriptionPromotion]:
+    result: list[SubscriptionPromotion] = []
+    for period_months in VALID_BILLING_MONTHS:
+        promotion = await resolve_best_promotion_for_checkout(
+            db,
+            plan=plan,
+            action=PaymentAction.PURCHASE,
+            period_months=period_months,
+            company_id=company_id,
+        )
+        if promotion:
+            result.append(promotion)
+    return result
 
 
 def promotion_discounted_monthly_price(plan: SubscriptionPlan, promotion: SubscriptionPromotion) -> int:
-    final_amount, _ = calculate_discount(plan.price_monthly, promotion.discount_percent)
-    return final_amount
+    if promotion.period_months == 1:
+        return promotion.promotional_amount
+    return promotion.promotional_amount // promotion.period_months
+
+
+def promotion_checkout_amounts(
+    plan: SubscriptionPlan, promotion: SubscriptionPromotion
+) -> tuple[int, int]:
+    original_amount = promotion_base_amount(plan, promotion)
+    final_amount = promotion.promotional_amount
+    discount_amount = original_amount - final_amount
+    return final_amount, discount_amount
 
 
 async def register_promotion_usage(db: AsyncSession, payment: Payment) -> None:
@@ -162,17 +214,56 @@ async def register_promotion_usage(db: AsyncSession, payment: Payment) -> None:
         await db.flush()
 
 
+async def _validate_promotional_price(
+    db: AsyncSession,
+    *,
+    plan_code: str,
+    period_months: int,
+    promotional_amount: int,
+) -> SubscriptionPlan:
+    if period_months not in VALID_BILLING_MONTHS:
+        raise AppError("Срок акции: 1, 3, 6 или 12 месяцев")
+    plan = await get_plan_by_code(db, plan_code)
+    base_amount = calculate_price(plan, period_months)
+    if promotional_amount >= base_amount:
+        raise AppError(
+            f"Стоимость акции ({promotional_amount} ₽) должна быть ниже базовой ({base_amount} ₽)"
+        )
+    if promotional_amount < 1:
+        raise AppError("Стоимость акции должна быть больше 0")
+    return plan
+
+
+async def load_promotion_companies(
+    db: AsyncSession, promotion: SubscriptionPromotion
+) -> list[dict]:
+    if promotion.for_all_companies or not promotion.company_ids:
+        return []
+    from app.models.entities import Company
+
+    ids = [UUID(item) for item in promotion.company_ids]
+    result = await db.execute(select(Company.id, Company.name).where(Company.id.in_(ids)))
+    by_id = {row.id: row.name for row in result.all()}
+    companies = []
+    for company_id in ids:
+        name = by_id.get(company_id)
+        if name is not None:
+            companies.append({"id": company_id, "name": name})
+    return companies
+
+
 async def create_subscription_promotion(
     db: AsyncSession,
     admin: User,
     *,
     name: str,
-    discount_percent: int,
-    plan_codes: list[str] | None = None,
-    actions: list[str] | None = None,
+    plan_code: str,
+    period_months: int,
+    promotional_amount: int,
     for_all_companies: bool = True,
     company_ids: list[UUID] | None = None,
-    first_plan_purchase_only: bool = False,
+    new_companies_only: bool = False,
+    is_active: bool = True,
     max_uses: int | None = None,
     valid_from: datetime | None = None,
     valid_until: datetime | None = None,
@@ -181,37 +272,37 @@ async def create_subscription_promotion(
     title = name.strip()
     if not title:
         raise AppError("Название акции не может быть пустым")
-    if discount_percent < 1 or discount_percent > 100:
-        raise AppError("Скидка: от 1 до 100%")
 
-    if plan_codes:
-        for plan_code in plan_codes:
-            await get_plan_by_code(db, plan_code)
-
-    if actions:
-        valid_actions = {a.value for a in PaymentAction}
-        invalid = set(actions) - valid_actions
-        if invalid:
-            raise AppError(f"Неизвестные типы оплаты: {', '.join(sorted(invalid))}")
+    await _validate_promotional_price(
+        db,
+        plan_code=plan_code,
+        period_months=period_months,
+        promotional_amount=promotional_amount,
+    )
 
     if not for_all_companies:
         if not company_ids:
-            raise AppError("Укажите company_ids или включите for_all_companies")
-        for company_id in company_ids:
+            raise AppError("Укажите company_ids — id компаний из GET /admin/companies")
+        unique_ids = list(dict.fromkeys(company_ids))
+        for company_id in unique_ids:
             from app.models.entities import Company
 
             company = await db.get(Company, company_id)
             if not company:
-                raise NotFoundError(f"Компания {company_id} не найдена")
+                raise NotFoundError(f"Компания с id {company_id} не найдена")
+        company_ids = unique_ids
+    elif company_ids:
+        raise AppError("company_ids указываются только при for_all_companies=false")
 
     promotion = SubscriptionPromotion(
         name=title,
-        discount_percent=discount_percent,
-        plan_codes=plan_codes,
-        actions=actions,
+        plan_code=plan_code.strip(),
+        period_months=period_months,
+        promotional_amount=promotional_amount,
         for_all_companies=for_all_companies,
         company_ids=[str(item) for item in company_ids] if company_ids else None,
-        first_plan_purchase_only=first_plan_purchase_only,
+        new_companies_only=new_companies_only,
+        is_active=is_active,
         max_uses=max_uses,
         valid_from=valid_from,
         valid_until=valid_until,
@@ -235,12 +326,12 @@ async def update_subscription_promotion(
     promotion_id: UUID,
     *,
     name: str | None = None,
-    discount_percent: int | None = None,
-    plan_codes: list[str] | None = None,
-    actions: list[str] | None = None,
+    plan_code: str | None = None,
+    period_months: int | None = None,
+    promotional_amount: int | None = None,
     for_all_companies: bool | None = None,
     company_ids: list[UUID] | None = None,
-    first_plan_purchase_only: bool | None = None,
+    new_companies_only: bool | None = None,
     max_uses: int | None = None,
     valid_from: datetime | None = None,
     valid_until: datetime | None = None,
@@ -260,22 +351,20 @@ async def update_subscription_promotion(
             raise AppError("Название акции не может быть пустым")
         promotion.name = title
 
-    if discount_percent is not None:
-        if discount_percent < 1 or discount_percent > 100:
-            raise AppError("Скидка: от 1 до 100%")
-        promotion.discount_percent = discount_percent
+    next_plan_code = plan_code.strip() if plan_code is not None else promotion.plan_code
+    next_period = period_months if period_months is not None else promotion.period_months
+    next_amount = promotional_amount if promotional_amount is not None else promotion.promotional_amount
 
-    if plan_codes is not None:
-        for plan_code in plan_codes:
-            await get_plan_by_code(db, plan_code)
-        promotion.plan_codes = plan_codes or None
-
-    if actions is not None:
-        valid_actions = {a.value for a in PaymentAction}
-        invalid = set(actions) - valid_actions
-        if invalid:
-            raise AppError(f"Неизвестные типы оплаты: {', '.join(sorted(invalid))}")
-        promotion.actions = actions or None
+    if plan_code is not None or period_months is not None or promotional_amount is not None:
+        await _validate_promotional_price(
+            db,
+            plan_code=next_plan_code,
+            period_months=next_period,
+            promotional_amount=next_amount,
+        )
+        promotion.plan_code = next_plan_code
+        promotion.period_months = next_period
+        promotion.promotional_amount = next_amount
 
     if for_all_companies is not None:
         promotion.for_all_companies = for_all_companies
@@ -285,17 +374,18 @@ async def update_subscription_promotion(
     if clear_company_ids:
         promotion.company_ids = None
     elif company_ids is not None:
-        for company_id in company_ids:
+        unique_ids = list(dict.fromkeys(company_ids))
+        for company_id in unique_ids:
             from app.models.entities import Company
 
             company = await db.get(Company, company_id)
             if not company:
-                raise NotFoundError(f"Компания {company_id} не найдена")
-        promotion.company_ids = [str(item) for item in company_ids]
+                raise NotFoundError(f"Компания с id {company_id} не найдена")
+        promotion.company_ids = [str(item) for item in unique_ids]
         promotion.for_all_companies = False
 
-    if first_plan_purchase_only is not None:
-        promotion.first_plan_purchase_only = first_plan_purchase_only
+    if new_companies_only is not None:
+        promotion.new_companies_only = new_companies_only
 
     if max_uses is not None:
         promotion.max_uses = max_uses
@@ -317,7 +407,9 @@ async def update_subscription_promotion(
         promotion.description = description
 
     if not promotion.for_all_companies and not promotion.company_ids:
-        raise ConflictError("Укажите company_ids или включите for_all_companies")
+        raise ConflictError(
+            "Укажите company_ids (id компаний) или установите for_all_companies=true"
+        )
 
     await db.flush()
     return promotion
