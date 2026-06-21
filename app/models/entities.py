@@ -444,7 +444,7 @@ class CompanyRole(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     company: Mapped["Company"] = relationship(back_populates="roles")
-    members: Mapped[list["CompanyMember"]] = relationship(back_populates="role")
+    members: Mapped[list["CompanyMember"]] = relationship(back_populates="role", overlaps="members")
 
 
 class CompanyMember(Base):
@@ -471,9 +471,9 @@ class CompanyMember(Base):
     compensation_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    company: Mapped["Company"] = relationship(back_populates="members")
+    company: Mapped["Company"] = relationship(back_populates="members", overlaps="members")
     user: Mapped["User"] = relationship(back_populates="memberships")
-    role: Mapped["CompanyRole"] = relationship(back_populates="members")
+    role: Mapped["CompanyRole"] = relationship(back_populates="members", overlaps="company,members")
     work_schedules: Mapped[list["MemberWorkSchedule"]] = relationship(
         back_populates="member", cascade="all, delete-orphan"
     )
