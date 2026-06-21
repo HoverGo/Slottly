@@ -11,6 +11,14 @@ class UserRegister(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=255)
 
+    @model_validator(mode="after")
+    def validate_password_strength(self) -> "UserRegister":
+        if not re.search(r"[A-Za-z]", self.password):
+            raise ValueError("Пароль должен содержать хотя бы одну букву")
+        if not re.search(r"\d", self.password):
+            raise ValueError("Пароль должен содержать хотя бы одну цифру")
+        return self
+
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -22,9 +30,13 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
     @model_validator(mode="after")
-    def passwords_must_differ(self) -> "PasswordChange":
+    def validate_password_change(self) -> "PasswordChange":
         if self.current_password == self.new_password:
             raise ValueError("Новый пароль должен отличаться от текущего")
+        if not re.search(r"[A-Za-z]", self.new_password):
+            raise ValueError("Новый пароль должен содержать хотя бы одну букву")
+        if not re.search(r"\d", self.new_password):
+            raise ValueError("Новый пароль должен содержать хотя бы одну цифру")
         return self
 
 

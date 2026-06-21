@@ -7,7 +7,7 @@
 | Runtime | Python 3.12 |
 | Web | FastAPI, Uvicorn |
 | ORM | SQLAlchemy 2.0 async |
-| DB | PostgreSQL 16 |
+| DB | PostgreSQL 18 |
 | Миграции | Alembic |
 | Auth | JWT (python-jose), bcrypt |
 | Validation | Pydantic v2 |

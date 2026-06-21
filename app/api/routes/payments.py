@@ -11,6 +11,7 @@ from app.models.entities import PaymentProvider, User
 from app.schemas.admin import PaymentCheckoutPreviewRequest, PaymentCheckoutPreviewResponse
 from app.schemas.cabinet import PaymentCheckoutCreate, PaymentResponse
 from app.schemas.schemas import SubscriptionPlanResponse
+from app.core.webhook_security import verify_payment_webhook
 from app.services.company_service import get_company_available_plans, list_all_plans
 from app.services.payment_service import create_checkout, get_payment, preview_checkout, process_webhook
 from app.services.plan_pricing_service import build_plan_responses_with_promotions
@@ -120,6 +121,7 @@ async def payment_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    verify_payment_webhook(request, provider)
     payload = await request.json()
     payment = await process_webhook(db, provider, payload)
     if not payment:

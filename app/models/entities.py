@@ -24,6 +24,16 @@ from app.core.database import Base
 from app.models.enums import PaymentAction, PaymentProvider
 
 
+def _pg_enum(enum_class: type[enum.Enum], name: str, **kwargs: Any) -> Enum:
+    """PostgreSQL enum: в БД пишем value (active), не имя члена (ACTIVE)"""
+    return Enum(
+        enum_class,
+        name=name,
+        values_callable=lambda members: [member.value for member in members],
+        **kwargs,
+    )
+
+
 class SubscriptionStatus(str, enum.Enum):
     ACTIVE = "active"
     EXPIRED = "expired"
@@ -185,7 +195,7 @@ class UserSubscription(Base):
     )
     scheduled_change_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[SubscriptionStatus] = mapped_column(
-        Enum(SubscriptionStatus, name="subscription_status", create_type=False),
+        _pg_enum(SubscriptionStatus, name="subscription_status", create_type=False),
         default=SubscriptionStatus.ACTIVE,
         nullable=False,
     )
@@ -213,10 +223,10 @@ class Payment(Base):
     user_subscription_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_subscriptions.id"), nullable=True
     )
-    action: Mapped[PaymentAction] = mapped_column(Enum(PaymentAction, name="payment_action"), nullable=False)
+    action: Mapped[PaymentAction] = mapped_column(_pg_enum(PaymentAction, name="payment_action"), nullable=False)
     period_months: Mapped[int] = mapped_column(Integer, nullable=False)
     provider: Mapped[PaymentProvider] = mapped_column(
-        Enum(PaymentProvider, name="payment_provider"), nullable=False
+        _pg_enum(PaymentProvider, name="payment_provider"), nullable=False
     )
     provider_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -224,7 +234,7 @@ class Payment(Base):
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="RUB", nullable=False)
     status: Mapped[PaymentStatus] = mapped_column(
-        Enum(PaymentStatus, name="payment_status"), default=PaymentStatus.PENDING, nullable=False
+        _pg_enum(PaymentStatus, name="payment_status"), default=PaymentStatus.PENDING, nullable=False
     )
     confirmation_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     promo_code_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -310,7 +320,7 @@ class Company(Base):
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     organization_type: Mapped[OrganizationType | None] = mapped_column(
-        Enum(OrganizationType, name="organization_type"), nullable=True
+        _pg_enum(OrganizationType, name="organization_type"), nullable=True
     )
     working_hours: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     booking_slug: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
@@ -465,7 +475,7 @@ class CompanyMember(Base):
     role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     photo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     compensation_type: Mapped[CompensationType | None] = mapped_column(
-        Enum(CompensationType, name="compensation_type"), nullable=True
+        _pg_enum(CompensationType, name="compensation_type"), nullable=True
     )
     compensation_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     compensation_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -503,7 +513,7 @@ class MemberWorkSchedule(Base):
     time_end: Mapped[time] = mapped_column(Time, nullable=False)
     slot_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     pattern_type: Mapped[SchedulePatternType] = mapped_column(
-        Enum(SchedulePatternType, name="schedule_pattern_type"), nullable=False
+        _pg_enum(SchedulePatternType, name="schedule_pattern_type"), nullable=False
     )
     pattern_config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -532,7 +542,7 @@ class MemberScheduleException(Base):
     exception_date_to: Mapped[date | None] = mapped_column(nullable=True)
     exception_dates: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     kind: Mapped[ScheduleExceptionKind] = mapped_column(
-        Enum(ScheduleExceptionKind, name="schedule_exception_kind"), nullable=False
+        _pg_enum(ScheduleExceptionKind, name="schedule_exception_kind"), nullable=False
     )
     block_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -555,7 +565,7 @@ class SupportTicket(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[SupportTicketStatus] = mapped_column(
-        Enum(SupportTicketStatus, name="support_ticket_status"), nullable=False
+        _pg_enum(SupportTicketStatus, name="support_ticket_status"), nullable=False
     )
     assigned_to_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
@@ -610,12 +620,12 @@ class CompanyJoinRequest(Base):
     role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     invited_by_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     compensation_type: Mapped[CompensationType | None] = mapped_column(
-        Enum(CompensationType, name="compensation_type", create_type=False), nullable=True
+        _pg_enum(CompensationType, name="compensation_type", create_type=False), nullable=True
     )
     compensation_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     compensation_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[JoinRequestStatus] = mapped_column(
-        Enum(JoinRequestStatus, name="join_request_status", create_type=False),
+        _pg_enum(JoinRequestStatus, name="join_request_status", create_type=False),
         default=JoinRequestStatus.PENDING,
         nullable=False,
     )
@@ -717,7 +727,7 @@ class MemberAppointment(Base):
     client_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     client_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[AppointmentStatus] = mapped_column(
-        Enum(AppointmentStatus, name="appointment_status"), nullable=False
+        _pg_enum(AppointmentStatus, name="appointment_status"), nullable=False
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -772,7 +782,7 @@ class WarehouseItem(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     item_type: Mapped[WarehouseItemType] = mapped_column(
-        Enum(WarehouseItemType, name="warehouse_item_type"), nullable=False
+        _pg_enum(WarehouseItemType, name="warehouse_item_type"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sku: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -833,7 +843,7 @@ class WarehouseMovement(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("warehouse_items.id"), nullable=False)
     movement_type: Mapped[StockMovementType] = mapped_column(
-        Enum(StockMovementType, name="stock_movement_type"), nullable=False
+        _pg_enum(StockMovementType, name="stock_movement_type"), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     branch_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -882,3 +892,37 @@ class CompanyReview(Base):
     company: Mapped["Company"] = relationship(back_populates="reviews")
     client: Mapped["CompanyClient"] = relationship(back_populates="reviews")
     member: Mapped["CompanyMember | None"] = relationship(foreign_keys=[member_id])
+
+
+class AuditLog(Base):
+    """Журнал действий на сервере: админка, мутации API, аутентификация"""
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_created_at", "created_at"),
+        Index("ix_audit_logs_actor_user_id", "actor_user_id"),
+        Index("ix_audit_logs_category", "category"),
+        Index("ix_audit_logs_company_id", "company_id"),
+        Index("ix_audit_logs_action", "action"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    actor_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    action: Mapped[str] = mapped_column(String(128), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    actor: Mapped["User | None"] = relationship(foreign_keys=[actor_user_id])

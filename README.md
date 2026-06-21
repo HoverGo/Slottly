@@ -5,7 +5,7 @@
 ## Стек
 
 - FastAPI + Uvicorn
-- SQLAlchemy 2.0 (async) + PostgreSQL 16
+- SQLAlchemy 2.0 (async) + PostgreSQL 18
 - Alembic
 - JWT (Bearer)
 - Docker Compose
@@ -23,7 +23,7 @@ docker compose up --build
 
 При старте контейнер `api`:
 1. Ждёт PostgreSQL
-2. Применяет миграции Alembic (`001`–`008`)
+2. Применяет миграции Alembic (`001`–`024`)
 3. Сидирует тарифы и назначает platform-admin по email
 4. Запускает Uvicorn
 
@@ -37,16 +37,21 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 ```bash
 docker compose down        # остановить
-docker compose down -v     # остановить и удалить данные БД
+docker compose down -v     # остановить и удалить данные БД/Redis
 ```
+
+При обновлении с PostgreSQL 16 на 18 путь тома БД изменился — для миграции данных используйте `pg_dump`/`pg_restore` или пересоздайте том (`down -v`).
 
 ## Переменные окружения
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
-| `SECRET_KEY` | см. compose | Ключ JWT |
+| `SECRET_KEY` | см. compose | Ключ JWT (в production ≥ 32 символов) |
+| `ENVIRONMENT` | `development` | `production` включает проверку конфигурации |
 | `DATABASE_URL` | `...@db:5432/commerce_db` | PostgreSQL |
-| `DEBUG` | `false` | Лог SQL |
+| `DEBUG` | `false` | Лог SQL, OpenAPI |
+| `PAYMENT_WEBHOOK_SECRET` | — | Секрет webhook (`X-Webhook-Secret`) |
+| `CORS_ORIGINS` | — | Разрешённые origin через запятую |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Время жизни токена |
 | `PAYMENT_PROVIDER` | `mock` | `mock`, `yookassa`, `cloudpayments` |
 | `PAYMENT_RETURN_URL` | `http://localhost:8000/cabinet/payments/success` | URL возврата после оплаты |
@@ -184,9 +189,39 @@ docs/
 8. POST /companies/{id}/members/{id}/schedules
 ```
 
+## Безопасность
+
+Реализовано в коде:
+
+| Механизм | Описание |
+|----------|----------|
+| Rate limiting | По IP и типу endpoint; **Redis** при `REDIS_URL` — общий счётчик для нескольких воркеров |
+| Anti-bruteforce | Блокировка входа после `LOGIN_MAX_ATTEMPTS`; **Redis** при `REDIS_URL` |
+| Audit log | Журнал действий в БД: auth, мутации API, админка; `GET /admin/audit-logs` |
+| Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, HSTS в production |
+| CORS | Настраивается через `CORS_ORIGINS` |
+| Webhook secret | `X-Webhook-Secret` для `/payments/webhook/*`; mock запрещён в production |
+| Upload validation | Magic bytes + проверка соответствия Content-Type |
+| Path traversal | Блокировка `../` при доступе к файлам |
+| Пароли | bcrypt; мин. 8 символов, буква + цифра |
+| Production config | Валидация `SECRET_KEY`, БД, webhook при `ENVIRONMENT=production` |
+| Tenant isolation | Чужая компания → 404 |
+| PII | Хранится в БД; HTTPS обязателен в production (reverse proxy) |
+
+Подробнее: `docs/legal/security-policy.md`, переменные — `.env.example`.
+
+### Автотесты
+
+```bash
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+Покрытие: rate limit, brute-force, audit, webhook, upload, path traversal, JWT/пароли, middleware, production config.
+
 ## Админ платформы
 
-Пользователь с `is_platform_admin: true` получает доступ к `/api/v1/admin/*`: дашборд, пользователи, компании (с подписками и оплатой), объявления о техработах, промокоды, назначение роли техподдержки.
+Пользователь с `is_platform_admin: true` получает доступ к `/api/v1/admin/*`: дашборд, пользователи, компании (с подписками и оплатой), объявления о техработах, промокоды, журнал аудита, назначение роли техподдержки.
 
 ## Техподдержка платформы
 

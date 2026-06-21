@@ -545,6 +545,43 @@ Webhook от платёжной системы (`mock`, `yookassa`, `cloudpaymen
 
 ---
 
+### `GET /api/v1/admin/audit-logs`
+
+Журнал действий на сервере (аутентификация, мутации API, админка, webhook).
+
+**Query:** `category`, `action`, `actor_user_id`, `company_id`, `success`, `date_from`, `date_to`, `limit` (1–200, по умолчанию 50), `offset`.
+
+**Ответ `200`:**
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "created_at": "2026-06-21T12:00:00Z",
+      "actor_user_id": "uuid",
+      "actor_email": "admin@example.com",
+      "action": "http.patch.api.v1.admin.users.{id}.platform_admin",
+      "category": "admin",
+      "resource_type": "users",
+      "resource_id": "uuid",
+      "company_id": null,
+      "ip_address": "127.0.0.1",
+      "method": "PATCH",
+      "path": "/api/v1/admin/users/.../platform-admin",
+      "status_code": 200,
+      "success": true,
+      "details": null
+    }
+  ],
+  "total": 1
+}
+```
+
+Категории: `auth`, `mutation`, `admin`, `webhook`. Пароли и токены в `details` маскируются.
+
+---
+
 ### `PATCH /api/v1/admin/users/{user_id}/platform-support`
 
 Назначить или снять роль техподдержки платформы. Только `is_platform_admin`.

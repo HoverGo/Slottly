@@ -146,6 +146,32 @@ class PlatformMainAdminUpdate(BaseModel):
     is_platform_main_admin: bool
 
 
+class AuditLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    created_at: datetime
+    actor_user_id: UUID | None
+    actor_email: str | None
+    action: str
+    category: str
+    resource_type: str | None
+    resource_id: UUID | None
+    company_id: UUID | None
+    ip_address: str | None
+    user_agent: str | None
+    method: str | None
+    path: str | None
+    status_code: int | None
+    success: bool
+    details: dict | None
+
+
+class AuditLogListResponse(BaseModel):
+    items: list[AuditLogResponse]
+    total: int
+
+
 class PaymentCheckoutPreviewRequest(BaseModel):
     plan_code: str = Field(min_length=1, max_length=50)
     action: PaymentAction

@@ -213,7 +213,8 @@ docker compose up --build
 
 | Сервис | Образ | Порт |
 |--------|-------|------|
-| `db` | postgres:16-alpine | 5432 (internal) |
+| `db` | postgres:18.4-alpine | 5432 (internal) |
+| `redis` | redis:8.8.0-alpine | 6379 (internal) |
 | `api` | Dockerfile | 8000 |
 
 Entrypoint: `scripts/docker_entrypoint.py` — ожидание БД, `alembic upgrade head`, uvicorn.

@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,8 @@ from app.schemas.admin import (
     AdminCompanyResponse,
     AdminDashboardResponse,
     AdminUserResponse,
+    AuditLogListResponse,
+    AuditLogResponse,
     PlatformAdminUpdate,
     PlatformAnnouncementCreate,
     PlatformAnnouncementResponse,
@@ -35,6 +38,7 @@ from app.services.admin_service import (
     set_user_platform_main_admin,
     set_user_platform_support,
 )
+from app.services.audit_service import list_audit_logs
 from app.services.announcement_service import (
     create_announcement,
     list_announcements_admin,
@@ -384,3 +388,35 @@ async def admin_update_subscription_promotion(
         return await _promotion_to_response(db, promotion)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/audit-logs", response_model=AuditLogListResponse)
+async def admin_audit_logs(
+    _: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+    category: str | None = Query(default=None, max_length=32),
+    action: str | None = Query(default=None, max_length=128),
+    actor_user_id: UUID | None = Query(default=None),
+    company_id: UUID | None = Query(default=None),
+    success: bool | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> AuditLogListResponse:
+    rows, total = await list_audit_logs(
+        db,
+        category=category,
+        action=action,
+        actor_user_id=actor_user_id,
+        company_id=company_id,
+        success=success,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+    )
+    return AuditLogListResponse(
+        items=[AuditLogResponse.model_validate(row) for row in rows],
+        total=total,
+    )

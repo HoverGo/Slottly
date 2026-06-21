@@ -10,6 +10,7 @@ from app.core.exceptions import AppError, ForbiddenError, NotFoundError
 from app.core.permissions import MANAGE_COMPANY, MANAGE_MEMBERS
 from app.core.tenant import TenantContext
 from app.models.entities import Company, CompanyGalleryPhoto, CompanyMember
+from app.core.upload_validation import validate_image_upload
 from app.repositories.tenant_repository import TenantRepository
 
 ALLOWED_CONTENT_TYPES = {
@@ -56,16 +57,14 @@ def delete_file(relative_path: str | None) -> None:
 
 async def _read_and_validate_upload(file: UploadFile) -> tuple[bytes, str]:
     content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        raise AppError("Допустимые форматы: JPEG, PNG, WebP")
-
     data = await file.read()
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
     if len(data) > max_bytes:
         raise AppError(f"Размер файла не более {settings.max_upload_size_mb} МБ")
     if not data:
         raise AppError("Файл пустой")
-    return data, ALLOWED_CONTENT_TYPES[content_type]
+    ext = validate_image_upload(data, content_type)
+    return data, ext
 
 
 def _save_bytes(relative_path: str, data: bytes) -> str:
